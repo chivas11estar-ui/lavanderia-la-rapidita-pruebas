@@ -2187,11 +2187,11 @@ function isCurrentMonth(value, reference = new Date()) {
 
 function isVisibleInOrdersList(order) {
   if (normalizeStatus(order.status) !== "entregado") return true;
-  const deliveredDate = new Date(order.deliveredAt || order.updatedAt || order.createdAt);
+  const referenceDate = new Date(order.deliveredAt || order.createdAt);
   const limit = new Date();
   limit.setDate(limit.getDate() - 7);
   limit.setHours(0, 0, 0, 0);
-  return deliveredDate >= limit;
+  return referenceDate >= limit;
 }
 
 function formatShortDate(value) {

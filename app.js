@@ -2187,6 +2187,14 @@ function isCurrentMonth(value, reference = new Date()) {
 
 function isVisibleInOrdersList(order) {
   const status = normalizeStatus(order.status);
+
+  // Limpieza de migración: Ocultar pedidos pendientes creados antes de Septiembre 2026
+  const createdAt = new Date(order.createdAt);
+  const cutoffDate = new Date("2026-09-01T00:00:00");
+  if (createdAt < cutoffDate && status === "recibido" && !order.paid) {
+    return false;
+  }
+
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

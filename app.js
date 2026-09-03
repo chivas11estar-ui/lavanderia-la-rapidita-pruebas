@@ -951,6 +951,24 @@ async function initializeSync(user) {
   const result = await engine.initialize(normalizeState(saved));
   state = normalizeState(result.state);
 
+  // AUTO-FIX: Corregir pedidos de agosto para que aparezcan como entregados y pagados en su mes
+  const cutoff = new Date("2026-09-01T00:00:00");
+  const toFix = state.orders.filter(o => new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid));
+
+  if (toFix.length > 0) {
+    await mutate((next) => {
+      next.orders.forEach(o => {
+        if (new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid)) {
+          o.status = "entregado";
+          o.paid = true;
+          o.paidAt = o.createdAt;
+          o.deliveredAt = o.createdAt;
+          o.updatedAt = new Date().toISOString();
+        }
+      });
+    });
+  }
+
   elements.loginScreen.hidden = true;
   document.body.classList.remove("cloud-locked");
   showView("panelView");
@@ -1618,12 +1636,12 @@ function getSelectedService() {
 }
 
 function renderSummary() {
-  const todayOrders = state.orders.filter((order) => isToday(order.createdAt) && isVisibleInOrdersList(order));
-  const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt) && isVisibleInOrdersList(order));
+  const todayOrders = state.orders.filter((order) => isToday(order.createdAt));
+  const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt));
   const todayExpenses = state.expenses.filter((expense) => isToday(expense.createdAt));
   const sales = paidTodayOrders.reduce((sum, order) => sum + order.total, 0);
   const expenseTotals = calculateExpenseTotals(todayExpenses);
-  const activeOrders = state.orders.filter((order) => isActiveOrder(order) && isVisibleInOrdersList(order)).length;
+  const activeOrders = state.orders.filter(isActiveOrder).length;
 
   elements.salesToday.textContent = moneyFormatter.format(sales);
   elements.expensesToday.textContent = moneyFormatter.format(expenseTotals.cashOut);
@@ -2187,14 +2205,6 @@ function isCurrentMonth(value, reference = new Date()) {
 
 function isVisibleInOrdersList(order) {
   const status = normalizeStatus(order.status);
-
-  // Limpieza de migración: Ocultar pedidos antiguos que no fueron entregados en su momento
-  const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date("2026-09-01T00:00:00");
-  if (createdAt < cutoffDate && status !== "entregado" && !order.paid) {
-    return false;
-  }
-
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

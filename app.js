@@ -2188,10 +2188,10 @@ function isCurrentMonth(value, reference = new Date()) {
 function isVisibleInOrdersList(order) {
   const status = normalizeStatus(order.status);
 
-  // Limpieza de migración: Ocultar pedidos pendientes creados antes de Septiembre 2026
+  // Limpieza de migración: Ocultar pedidos antiguos que no fueron entregados en su momento
   const createdAt = new Date(order.createdAt);
   const cutoffDate = new Date("2026-09-01T00:00:00");
-  if (createdAt < cutoffDate && status === "recibido" && !order.paid) {
+  if (createdAt < cutoffDate && status !== "entregado" && !order.paid) {
     return false;
   }
 

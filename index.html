@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Control de pedidos, clientes, pagos, gastos, insumos y servicios de La Rapidita Lavanderia Express." />
+    <meta name="theme-color" content="#00657b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="La Rapidita" />
+    <title>La Rapidita Lavanderia Express</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/logo-la-rapidita.jpeg" type="image/jpeg" />
+    <link rel="apple-touch-icon" href="assets/icon-180.png" />
+    <link rel="stylesheet" href="styles.css?v=30" />
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen" aria-labelledby="loginTitle">
+      <div class="login-card" id="loginForm">
+        <span class="login-logo"><img src="assets/icon-192.png" alt="" width="72" height="72" decoding="async" /></span>
+        <p class="eyebrow">Datos protegidos en la nube</p>
+        <h1 id="loginTitle">Entrar a La Rapidita</h1>
+        <p>Continua con una de las cuentas de Google autorizadas para ver los mismos datos en cualquier dispositivo.</p>
+        <button class="primary-button wide-button" id="loginGoogleButton" type="button">Continuar con Google</button>
+        <p class="login-message" id="loginMessage" role="status"></p>
+      </div>
+    </section>
+
+    <header class="top-app-bar">
+      <button class="brand-button" data-view="panelView" type="button" aria-label="Ir al panel">
+        <span class="brand-mark"><img src="assets/icon-192.png" alt="" width="48" height="48" decoding="async" /></span>
+        <strong>La Rapidita</strong>
+      </button>
+      <div class="top-actions">
+        <span id="syncStatus" class="sync-status synced" title="Estado de sincronización" style="margin-right: 8px; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: #e0f2f1; color: #00657b;">
+          <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+        </span>
+        <button class="icon-button" id="installAppButton" type="button" aria-label="Instalar aplicacion" title="Instalar aplicacion" hidden>
+          <i data-lucide="download"></i>
+        </button>
+        <button class="icon-button" data-view="servicesView" type="button" aria-label="Servicios" title="Servicios">
+          <i data-lucide="settings"></i>
+        </button>
+        <button class="icon-button" data-view="suppliesView" type="button" aria-label="Insumos" title="Insumos">
+          <i data-lucide="package-check"></i>
+        </button>
+        <span class="profile-mark" aria-hidden="true"><i data-lucide="user"></i></span>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="screen-section active" id="panelView" aria-label="Panel diario">
+        <header class="page-heading dashboard-heading">
+          <div>
+            <p class="eyebrow">Resumen de hoy</p>
+            <h1>Buenos dias</h1>
+            <p id="motivationalPhrase" class="motivational-phrase">Todo lo importante de la lavanderia, en un solo lugar.</p>
+          </div>
+          <div class="header-actions">
+            <button class="primary-button" data-view="newOrderView" type="button">
+              <i data-lucide="circle-plus"></i>Nuevo pedido
+            </button>
+            <button class="outline-button" data-view="expensesView" type="button">
+              <i data-lucide="wallet-cards"></i>Gasto
+            </button>
+          </div>
+        </header>
+
+        <section class="weather-sky-card sky-clear day" id="weatherSkyCard" aria-label="Cielo y clima actual">
+          <div class="sky-visual" aria-hidden="true">
+            <span class="sky-sun"></span>
+            <span class="sky-moon"></span>
+            <span class="sky-cloud cloud-one"></span>
+            <span class="sky-cloud cloud-two"></span>
+            <span class="sky-cloud cloud-three"></span>
+            <span class="sky-rain rain-one"></span>
+            <span class="sky-rain rain-two"></span>
+            <span class="sky-rain rain-three"></span>
+            <span class="sky-lightning"></span>
+            <span class="sky-stars"></span>
+          </div>
+          <div class="weather-content">
+            <p class="eyebrow">Cielo en vivo</p>
+            <h2 id="weatherTitle">Cargando clima...</h2>
+            <p id="weatherDescription">Preparando el cielo de La Rapidita.</p>
+            <div class="weather-details" aria-label="Detalles del clima">
+              <span><i data-lucide="thermometer"></i><strong id="weatherTemperature">--°</strong></span>
+              <span><i data-lucide="droplets"></i><strong id="weatherHumidity">--%</strong></span>
+              <span><i data-lucide="wind"></i><strong id="weatherWind">-- km/h</strong></span>
+            </div>
+          </div>
+          <button class="weather-refresh" id="weatherRefreshButton" type="button" aria-label="Actualizar clima">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </section>
+
+        <div class="summary-grid dashboard-metrics" aria-label="Resumen del dia">
+          <article class="metric metric-orders">
+            <span class="metric-icon"><i data-lucide="receipt-text"></i></span>
+            <span>Pedidos de hoy</span>
+            <strong id="todayOrders">0</strong>
+          </article>
+          <article class="metric metric-active">
+            <span class="metric-icon"><i data-lucide="truck"></i></span>
+            <span>Pedidos activos</span>
+            <strong id="activeOrders">0</strong>
+          </article>
+          <article class="metric metric-sales">
+            <span class="metric-icon"><i data-lucide="trending-up"></i></span>
+            <span>Cobrado hoy</span>
+            <strong id="salesToday">$0</strong>
+          </article>
+          <article class="metric metric-expenses">
+            <span class="metric-icon"><i data-lucide="receipt"></i></span>
+            <span>Gastos de hoy</span>
+            <strong id="expensesToday">$0</strong>
+          </article>
+          <article class="metric metric-profit profit">
+            <span class="metric-icon"><i data-lucide="piggy-bank"></i></span>
+            <span>Ganancia de hoy</span>
+            <strong id="profitToday">$0</strong>
+          </article>
+        </div>
+
+        <section class="gas-pulse-card" id="dashboardGas" aria-label="Costo y consumo de gas"></section>
+
+        <div class="dashboard-content">
+          <section class="content-block tracker-block">
+            <div class="block-heading">
+              <div>
+                <p class="eyebrow">Trabajo en curso</p>
+                <h2>Seguimiento de pedidos</h2>
+              </div>
+              <button class="text-button" data-view="ordersView" type="button">Ver todos</button>
+            </div>
+            <div class="dashboard-orders" id="dashboardOrders"></div>
+          </section>
+
+          <aside class="content-block insight-block">
+            <div class="block-heading">
+              <div>
+                <p class="eyebrow">Servicios</p>
+                <h2>Mas solicitados</h2>
+              </div>
+            </div>
+            <div class="dashboard-services" id="dashboardServices"></div>
+          </aside>
+        </div>
+
+        <div class="day-actions">
+          <span class="closing-status" id="closingStatus" role="status" aria-live="polite"></span>
+          <button class="ghost-button" id="exportButton" type="button"><i data-lucide="download"></i>Exportar CSV</button>
+          <button class="ghost-button" id="clearDayButton" type="button"><i data-lucide="calendar-check"></i>Finalizar día</button>
+        </div>
+      </section>
+
+      <section class="screen-section" id="newOrderView" aria-label="Nuevo pedido">
+        <header class="page-heading order-heading">
+          <div>
+            <p class="eyebrow">Registro</p>
+            <h1>Nuevo pedido</h1>
+            <p id="currentDate"></p>
+          </div>
+          <button class="outline-button" data-view="ordersView" type="button">
+            <i data-lucide="x"></i>Cancelar
+          </button>
+        </header>
+
+        <form id="orderForm" class="new-order-layout">
+          <div class="order-form-column">
+            <section class="form-section">
+              <div class="section-title">
+                <i data-lucide="user-plus"></i>
+                <div><h2>Cliente</h2><p>Nombre de quien deja la ropa.</p></div>
+              </div>
+              <div class="dropdown-entry-group">
+                <label for="customerSelect">Seleccionar cliente</label>
+                <select id="customerSelect" name="customerSelect" required></select>
+                <div id="newCustomerContainer" hidden>
+                  <label for="customerName">Nombre del nuevo cliente</label>
+                  <input id="customerName" name="customerName" autocomplete="off" placeholder="Escribe el nombre completo" />
+                  <label for="customerPhone">Teléfono (opcional)</label>
+                  <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="Ej. 55 1234 5678" />
+                </div>
+                <small class="field-help">Selecciona un cliente de la lista o elige "Nuevo cliente" para registrar uno nuevo.</small>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title">
+                <i data-lucide="shirt"></i>
+                <div><h2>Servicio y cobro</h2><p>Selecciona el servicio y captura la cantidad.</p></div>
+              </div>
+              <label>
+                Servicio
+                <select id="serviceSelect" name="serviceSelect" required></select>
+              </label>
+              <div class="form-row">
+                <label>
+                  Cantidad
+                  <input id="weightKg" name="weightKg" type="number" min="0.01" step="0.01" inputmode="decimal" required placeholder="3.15" />
+                </label>
+                <label>
+                  Precio por unidad
+                  <input id="pricePerKg" name="pricePerKg" type="number" min="1" step="0.5" inputmode="decimal" required />
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-title">
+                <i data-lucide="notebook-pen"></i>
+                <div><h2>Notas especiales</h2><p>Detalles para cuidar mejor la ropa.</p></div>
+              </div>
+              <label>
+                Indicaciones
+                <textarea id="notes" name="notes" rows="4" placeholder="Separar blancos, manchas, cobijas..."></textarea>
+              </label>
+            </section>
+          </div>
+
+          <aside class="order-summary-card">
+            <div class="summary-card-head">
+              <h2 id="orderFormTitle">Resumen del pedido</h2>
+              <span id="orderFormMode">Nuevo</span>
+            </div>
+            <div class="summary-card-body">
+              <div class="summary-service">
+                <i data-lucide="washing-machine"></i>
+                <div><strong id="selectedServiceName">Lavado y Secado</strong><small id="selectedServiceUnit">Cobro por kg</small></div>
+              </div>
+              <div class="calculation-box">
+                <div><span>Subtotal</span><strong id="subtotalPreview">$0.00</strong></div>
+                <div><span>Total redondeado</span><strong id="totalPreview">$0</strong></div>
+              </div>
+              <p class="rounding-note"><i data-lucide="info"></i>El total siempre se redondea al siguiente peso.</p>
+              <button class="primary-button wide-button" id="submitOrderButton" type="submit">
+                <i data-lucide="receipt-text"></i><span>Registrar pedido</span>
+              </button>
+            </div>
+          </aside>
+        </form>
+      </section>
+
+      <section class="screen-section" id="expensesView" aria-label="Gastos del dia">
+        <header class="page-heading">
+          <div><p class="eyebrow">Finanzas</p><h1>Gastos</h1><p>Registra lo que sale de caja.</p></div>
+        </header>
+        <div class="panel expense-panel">
+          <form id="expenseForm" class="stacked-form compact-form">
+            <div class="expense-type-grid" role="group" aria-label="Tipo de salida de dinero">
+              <button class="expense-type-button active" data-expense-category="insumo" type="button"><i data-lucide="package-check"></i><span>Comprar insumo</span></button>
+              <button class="expense-type-button" data-expense-category="gas" type="button"><i data-lucide="flame"></i><span>Recarga de gas</span></button>
+              <button class="expense-type-button" data-expense-category="luz" type="button"><i data-lucide="zap"></i><span>Recibo de luz</span></button>
+              <button class="expense-type-button" data-expense-category="operativo" type="button"><i data-lucide="receipt-text"></i><span>Gasto operativo</span></button>
+              <button class="expense-type-button" data-expense-category="retiro_personal" type="button"><i data-lucide="hand-coins"></i><span>Retiro personal</span></button>
+              <button class="expense-type-button" data-expense-category="inversion_deuda" type="button"><i data-lucide="landmark"></i><span>Inversion o deuda</span></button>
+            </div>
+            <div class="expense-mode-summary">
+              <strong id="expenseSelectedType">Compra de insumo</strong>
+              <span id="expenseFormHint">Registra una sola salida de dinero y actualiza el inventario.</span>
+            </div>
+            <div class="dropdown-entry-group" hidden>
+              <label for="expenseSelect">Concepto</label>
+              <select id="expenseSelect"></select>
+              <div id="newExpenseContainer" hidden>
+                <label for="expenseName">Escribir concepto</label>
+                <input id="expenseName" placeholder="Ej. Reparación de lavadora" />
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Concepto<input id="expenseConcept" required placeholder="Compra de jabon" /></label>
+              <label>Monto total<input id="expenseAmount" type="number" min="0.5" step="0.5" required placeholder="120" /></label>
+            </div>
+            <div class="form-row">
+              <label>Metodo de pago
+                <select id="expensePaymentMethod">
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </label>
+              <label>Fecha<input id="expenseDate" type="date" /></label>
+            </div>
+            <section class="expense-detail-section" id="expenseSupplyFields">
+              <label>Insumo<select id="expenseSupplySelect"></select></label>
+              <div class="form-row">
+                <label>Cantidad comprada<input id="expensePurchasedQuantity" type="number" min="0.01" step="0.01" placeholder="2" /></label>
+                <label>Unidad<input id="expensePurchasedUnit" placeholder="litros" /></label>
+              </div>
+              <small class="field-help" id="expenseUnitPricePreview">Precio unitario: pendiente.</small>
+            </section>
+            <section class="expense-detail-section" id="expenseGasFields" hidden>
+              <div class="form-row">
+                <label>Kg comprados<input id="expenseGasQuantity" type="number" min="0.01" step="0.01" placeholder="30" /></label>
+                <label>Capacidad del tanque<input id="expenseGasTankSize" type="number" min="1" step="1" value="30" /></label>
+              </div>
+              <small class="field-help" id="expenseGasUnitPricePreview">Precio por kg: pendiente.</small>
+            </section>
+            <section class="expense-detail-section" id="expenseLightFields" hidden>
+              <div class="form-row">
+                <label>Inicio del periodo<input id="expenseLightStart" type="date" /></label>
+                <label>Fin del periodo<input id="expenseLightEnd" type="date" /></label>
+              </div>
+              <label>Porcentaje usado por la lavanderia<input id="expenseBusinessPercent" type="number" min="1" max="100" step="1" value="100" /></label>
+            </section>
+            <p class="expense-explain" id="expensePersonalHint" hidden>Este retiro reduce el dinero disponible, pero no se considera costo de operacion de la lavanderia.</p>
+            <section class="expense-detail-section" id="expenseInvestmentFields" hidden>
+              <label>Subtipo
+                <select id="expenseInvestmentSubtype">
+                  <option value="inversion">Inversion</option>
+                  <option value="pago_deuda">Pago de deuda</option>
+                  <option value="aportacion">Aportacion al negocio</option>
+                </select>
+              </label>
+            </section>
+            <label>Nota opcional<textarea id="expenseNotes" rows="3" placeholder="Detalle corto para recordarlo despues"></textarea></label>
+            <button class="primary-button" id="expenseSubmitButton" type="submit"><i data-lucide="plus"></i>Guardar salida</button>
+          </form>
+          <div class="expense-list" id="expenseList"></div>
+        </div>
+      </section>
+
+      <section class="screen-section orders-section" id="ordersView" aria-label="Pedidos">
+        <header class="page-heading compact-heading"><div><p class="eyebrow">Operacion</p><h1>Pedidos</h1></div></header>
+        <div class="orders-toolbar">
+          <label class="search-box" for="orderSearch">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <input id="orderSearch" type="search" placeholder="Buscar pedido o cliente" autocomplete="off" />
+          </label>
+          <div class="filters" role="group" aria-label="Filtro de pedidos">
+            <button class="filter-button active" data-filter="todos" type="button">Todos</button>
+            <button class="filter-button" data-filter="activo" type="button">Activos</button>
+            <button class="filter-button" data-filter="completado" type="button">Listos</button>
+            <button class="filter-button" data-filter="sin-pago" type="button">Sin pago</button>
+          </div>
+        </div>
+        <div class="orders-list" id="ordersList"></div>
+      </section>
+
+      <section class="screen-section" id="clientsView" aria-label="Clientes">
+        <header class="page-heading"><div><p class="eyebrow">Directorio</p><h1>Clientes</h1><p>Se agregan automaticamente con cada pedido.</p></div></header>
+        <div class="orders-list" id="clientsList"></div>
+      </section>
+
+      <section class="screen-section" id="reportsView" aria-label="Informes">
+        <header class="page-heading reports-heading">
+          <div><p class="eyebrow">Finanzas</p><h1>Informes</h1><p>Resumen completo del negocio.</p></div>
+          <button class="primary-button" id="exportReportsButton" type="button"><i data-lucide="download"></i>Exportar CSV</button>
+        </header>
+
+        <div class="summary-grid report-metrics" aria-label="Resumen general">
+          <article class="metric"><span class="metric-icon"><i data-lucide="badge-dollar-sign"></i></span><span>Cobrado este mes</span><strong id="reportSales">$0</strong></article>
+          <article class="metric metric-expenses"><span class="metric-icon"><i data-lucide="receipt-text"></i></span><span>Gastos este mes</span><strong id="reportExpenses">$0</strong></article>
+          <article class="metric metric-profit profit"><span class="metric-icon"><i data-lucide="piggy-bank"></i></span><span>Ganancia total</span><strong id="reportProfit">$0</strong></article>
+          <article class="metric"><span class="metric-icon"><i data-lucide="clock"></i></span><span>Por cobrar</span><strong id="reportPending">$0</strong></article>
+        </div>
+
+        <div class="report-panels period-balances" aria-label="Balances por periodo">
+          <article class="panel"><div class="block-heading"><div><p class="eyebrow">Semana actual</p><h2>Balance semanal</h2></div></div><div class="report-list" id="weeklyBalance"></div></article>
+          <article class="panel"><div class="block-heading"><div><p class="eyebrow">Mes actual</p><h2>Balance mensual</h2></div></div><div class="report-list" id="monthlyBalance"></div></article>
+          <article class="panel"><div class="block-heading"><div><p class="eyebrow">Año actual</p><h2>Balance anual</h2></div></div><div class="report-list" id="yearlyBalance"></div></article>
+        </div>
+
+        <div class="report-dashboard">
+          <article class="panel chart-panel">
+            <div class="block-heading"><div><p class="eyebrow">Ultimos 7 dias</p><h2>Pagos recibidos por dia</h2></div></div>
+            <div class="weekly-chart" id="weeklyChart" aria-label="Grafica de ingresos de los ultimos siete dias"></div>
+          </article>
+          <article class="panel">
+            <div class="block-heading"><div><p class="eyebrow">Detalle</p><h2>Desglose de gastos</h2></div></div>
+            <div class="expense-breakdown" id="expenseBreakdown"></div>
+          </article>
+        </div>
+
+        <article class="panel transactions-panel">
+          <div class="block-heading"><div><p class="eyebrow">Movimientos</p><h2>Transacciones recientes</h2></div></div>
+          <div class="transactions-list" id="recentTransactions"></div>
+        </article>
+
+        <div class="report-panels">
+          <article class="panel"><div class="block-heading"><h2>Estado de pedidos</h2></div><div class="report-list" id="orderReportList"></div></article>
+          <article class="panel"><div class="block-heading"><h2>Cobrado por servicio</h2></div><div class="report-list" id="serviceReportList"></div></article>
+          <article class="panel closings-panel"><div class="block-heading"><h2>Cierres diarios</h2></div><div class="closings-list" id="closingsList"></div></article>
+        </div>
+      </section>
+
+      <section class="screen-section" id="servicesView" aria-label="Gestionar servicios">
+        <header class="page-heading"><div><p class="eyebrow">Configuracion</p><h1>Servicios</h1><p>Precios y tipos de cobro.</p></div></header>
+        <div class="services-list" id="servicesList"></div>
+        <form id="serviceForm" class="panel stacked-form service-form">
+          <div class="block-heading"><div><h2>Agregar servicio</h2><p>Define precio y unidad.</p></div></div>
+          <label>Nombre<input id="serviceName" required placeholder="Lavado express" /></label>
+          <div class="form-row">
+            <label>Precio<input id="servicePrice" type="number" min="1" step="0.5" required placeholder="25" /></label>
+            <label>Unidad<select id="serviceUnit"><option value="kg">por kg</option><option value="pieza">por pieza</option></select></label>
+          </div>
+          <label>Descripcion<input id="serviceDescription" placeholder="Servicio regular de lavado" /></label>
+          <button class="primary-button" type="submit"><i data-lucide="save"></i>Guardar servicio</button>
+        </form>
+      </section>
+
+      <section class="screen-section" id="suppliesView" aria-label="Inventario de insumos">
+        <header class="page-heading reports-heading">
+          <div>
+            <p class="eyebrow">Costos inteligentes</p>
+            <h1>Insumos</h1>
+            <p>Controla compras, mínimos y el costo real estimado por pedido.</p>
+          </div>
+        </header>
+
+        <div class="supply-dashboard">
+          <article class="panel gas-panel">
+            <div class="block-heading">
+              <div><p class="eyebrow">Aprendizaje</p><h2>Consumo de todos los insumos</h2></div>
+            </div>
+            <div class="gas-insight" id="gasInsight"></div>
+          </article>
+
+          <article class="panel">
+            <div class="block-heading">
+              <div><p class="eyebrow">Movimiento</p><h2>Registrar compra o uso</h2></div>
+            </div>
+            <form id="supplyForm" class="stacked-form compact-form">
+              <label>Insumo<select id="supplySelect" required></select></label>
+              <div class="form-row">
+                <label>Movimiento<select id="supplyMovementType"><option value="purchase">Compra</option><option value="usage">Ajuste (resta inventario)</option></select></label>
+                <label><span id="supplyQuantityLabel">Cantidad que entra o sale</span><input id="supplyQuantity" type="number" min="0.01" step="0.01" placeholder="Opcional si calculas por costo" /></label>
+              </div>
+              <div class="form-row" id="supplyPurchaseCostFields">
+                <label>Costo total de compra<input id="supplyCost" type="number" min="0" step="0.5" placeholder="Ej. 30" /></label>
+                <label>Precio por unidad de compra<input id="supplyUnitPrice" type="number" min="0" step="0.5" placeholder="Ej. 80 por kg" /></label>
+              </div>
+              <label id="supplyConversionField">Piezas por unidad de compra<input id="supplyPiecesPerUnit" type="number" min="0" step="1" placeholder="Solo si aplica" /></label>
+              <button class="primary-button" id="supplySubmitButton" type="submit"><i data-lucide="save"></i>Guardar movimiento</button>
+              <small class="field-help" id="supplyFormHelp">La app aprende el rendimiento entre una compra y la siguiente.</small>
+            </form>
+          </article>
+        </div>
+
+        <div class="services-list" id="suppliesList"></div>
+      </section>
+    </main>
+
+    <button class="floating-action" id="newOrderButton" type="button" aria-label="Nuevo pedido">
+      <i data-lucide="plus" aria-hidden="true"></i>
+      <span id="floatingActionLabel">Nuevo pedido</span>
+    </button>
+
+    <nav class="bottom-nav" aria-label="Navegacion principal">
+      <button class="nav-button active" data-view="panelView" type="button"><i data-lucide="layout-dashboard"></i>Panel</button>
+      <button class="nav-button" data-view="ordersView" type="button"><i data-lucide="receipt-text"></i>Pedidos</button>
+      <button class="nav-button" data-view="clientsView" type="button"><i data-lucide="users"></i>Clientes</button>
+      <button class="nav-button" data-view="expensesView" type="button"><i data-lucide="wallet-cards"></i>Gastos</button>
+      <button class="nav-button" data-view="suppliesView" type="button"><i data-lucide="package-check"></i>Insumos</button>
+      <button class="nav-button" data-view="reportsView" type="button"><i data-lucide="chart-no-axes-column"></i>Informes</button>
+    </nav>
+
+    <dialog class="edit-dialog" id="editOrderDialog">
+      <form id="editOrderForm" class="stacked-form" method="dialog">
+        <div class="dialog-header">
+          <div><p class="eyebrow">Corregir pedido</p><h2 id="editOrderCustomer">Pedido</h2></div>
+          <button class="dialog-close" id="cancelEditOrder" type="button" aria-label="Cerrar">&times;</button>
+        </div>
+        <input id="editOrderId" type="hidden" />
+        <input id="editOrderItemId" type="hidden" />
+        <label>Cantidad<input id="editOrderQuantity" type="number" min="0.01" step="0.01" required /></label>
+        <label>Precio<input id="editOrderPrice" type="number" min="1" step="0.5" required /></label>
+        <div class="calculation-box">
+          <div><span>Subtotal</span><strong id="editOrderSubtotal">$0.00</strong></div>
+          <div><span>Total redondeado</span><strong id="editOrderTotal">$0</strong></div>
+        </div>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="cancelEditOrderBottom" type="button">Cancelar</button>
+          <button class="primary-button" type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="edit-dialog" id="editClientDialog">
+      <form id="editClientForm" class="stacked-form" method="dialog">
+        <div class="dialog-header">
+          <div><p class="eyebrow">Clientes</p><h2>Editar cliente</h2></div>
+          <button class="dialog-close" id="cancelEditClient" type="button" aria-label="Cerrar">&times;</button>
+        </div>
+        <input id="editClientId" type="hidden" />
+        <label>Nombre del cliente<input id="editClientName" autocomplete="name" maxlength="80" required /></label>
+        <label>Teléfono (opcional)<input id="editClientPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="Ej. 55 1234 5678" /></label>
+        <p class="field-help">Los cambios se actualizarán en los pedidos de este cliente.</p>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="cancelEditClientBottom" type="button">Cancelar</button>
+          <button class="primary-button" type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="emptyOrdersTemplate"><div class="empty-state"><i data-lucide="washing-machine"></i><strong>No hay pedidos visibles</strong><span>Los entregados de mas de una semana se guardan, pero ya no estorban aqui.</span></div></template>
+    <script>
+      if ("serviceWorker" in navigator && ["http:", "https:"].includes(location.protocol)) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error) => {
+            console.error("No se pudo activar el modo sin conexión.", error);
+          });
+        });
+      }
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+    <script src="sync-v2.js"></script>
+    <script src="supply-learning-v2.js"></script>
+    <script src="app.js?v=31"></script>
+  </body>
+</html>

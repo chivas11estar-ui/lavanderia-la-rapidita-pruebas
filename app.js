@@ -2186,12 +2186,10 @@ function isCurrentMonth(value, reference = new Date()) {
 }
 
 function isVisibleInOrdersList(order) {
-  if (normalizeStatus(order.status) !== "entregado") return true;
+  const status = normalizeStatus(order.status);
+  if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
-  const limit = new Date();
-  limit.setDate(limit.getDate() - 7);
-  limit.setHours(0, 0, 0, 0);
-  return referenceDate >= limit;
+  return isToday(referenceDate);
 }
 
 function formatShortDate(value) {

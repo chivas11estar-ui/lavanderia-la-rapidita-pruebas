@@ -2575,9 +2575,6 @@ function escapeHtml(value) {
 }
 
 async function initializeApp() {
-  const localState = await loadState();
-  state = localState;
-
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && !AUTHORIZED_EMAILS.includes((user.email || "").toLowerCase())) {
       await firebase.auth().signOut();

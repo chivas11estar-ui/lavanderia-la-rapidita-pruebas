@@ -1618,12 +1618,12 @@ function getSelectedService() {
 }
 
 function renderSummary() {
-  const todayOrders = state.orders.filter((order) => isToday(order.createdAt));
-  const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt));
+  const todayOrders = state.orders.filter((order) => isToday(order.createdAt) && isVisibleInOrdersList(order));
+  const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt) && isVisibleInOrdersList(order));
   const todayExpenses = state.expenses.filter((expense) => isToday(expense.createdAt));
   const sales = paidTodayOrders.reduce((sum, order) => sum + order.total, 0);
   const expenseTotals = calculateExpenseTotals(todayExpenses);
-  const activeOrders = state.orders.filter(isActiveOrder).length;
+  const activeOrders = state.orders.filter((order) => isActiveOrder(order) && isVisibleInOrdersList(order)).length;
 
   elements.salesToday.textContent = moneyFormatter.format(sales);
   elements.expensesToday.textContent = moneyFormatter.format(expenseTotals.cashOut);

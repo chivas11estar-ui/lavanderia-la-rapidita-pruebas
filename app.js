@@ -1636,16 +1636,23 @@ function getSelectedService() {
 }
 
 function renderSummary() {
-  const todayOrders = state.orders.filter((order) => isToday(order.createdAt));
+  const todayOrders = state.orders.filter((order) => isToday(order.createdAt) && isVisibleInOrdersList(order));
   const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt));
   const todayExpenses = state.expenses.filter((expense) => isToday(expense.createdAt));
   const sales = paidTodayOrders.reduce((sum, order) => sum + order.total, 0);
   const expenseTotals = calculateExpenseTotals(todayExpenses);
   const activeOrders = state.orders.filter(isActiveOrder).length;
 
+  // Ganancia real estimada: Ingresos - Costos operativos (gas, jabon, luz, etc.) aprendidos
+  const estimatedCosts = paidTodayOrders.reduce((sum, order) => {
+    const profitability = calculateOrderProfitability(order);
+    return sum + profitability.cost;
+  }, 0);
+  const operatingProfit = sales - estimatedCosts;
+
   elements.salesToday.textContent = moneyFormatter.format(sales);
   elements.expensesToday.textContent = moneyFormatter.format(expenseTotals.cashOut);
-  elements.profitToday.textContent = moneyFormatter.format(sales - expenseTotals.operatingCost);
+  elements.profitToday.textContent = moneyFormatter.format(operatingProfit);
   elements.todayOrders.textContent = todayOrders.length;
   elements.activeOrders.textContent = activeOrders;
   renderDashboardGas();
@@ -2205,6 +2212,14 @@ function isCurrentMonth(value, reference = new Date()) {
 
 function isVisibleInOrdersList(order) {
   const status = normalizeStatus(order.status);
+
+  // Limpieza de migración: Ocultar pedidos antiguos que no fueron entregados/pagados antes de Septiembre
+  const createdAt = new Date(order.createdAt);
+  const cutoffDate = new Date("2026-09-01T00:00:00");
+  if (createdAt < cutoffDate && (status !== "entregado" || !order.paid)) {
+    return false;
+  }
+
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

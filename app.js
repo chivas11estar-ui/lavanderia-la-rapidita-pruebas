@@ -951,12 +951,21 @@ async function initializeSync(user) {
   const result = await engine.initialize(normalizeState(saved));
   state = normalizeState(result.state);
 
-  // AUTO-FIX: Corregir pedidos de agosto para que aparezcan como entregados y pagados en su mes
+  // Entrada instantánea: Ocultar pantalla de carga ya que tenemos los datos base
+  elements.loginScreen.hidden = true;
+  document.body.classList.remove("cloud-locked");
+  showView("panelView");
+  render();
+  setExpenseCategory(currentExpenseCategory);
+  updatePreview();
+  updateLiveWeather();
+
+  // AUTO-FIX: Corregir pedidos de agosto en segundo plano (sin bloquear al usuario)
   const cutoff = new Date("2026-09-01T00:00:00");
   const toFix = state.orders.filter(o => new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid));
 
   if (toFix.length > 0) {
-    await mutate((next) => {
+    mutate((next) => {
       next.orders.forEach(o => {
         if (new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid)) {
           o.status = "entregado";
@@ -966,16 +975,8 @@ async function initializeSync(user) {
           o.updatedAt = new Date().toISOString();
         }
       });
-    });
+    }).catch(err => console.warn("Error en auto-fix silencioso:", err));
   }
-
-  elements.loginScreen.hidden = true;
-  document.body.classList.remove("cloud-locked");
-  showView("panelView");
-  render();
-  setExpenseCategory(currentExpenseCategory);
-  updatePreview();
-  updateLiveWeather();
 }
 
 function normalizeExpenses(expenses) {

@@ -392,7 +392,10 @@
 
     async readRemoteState() {
       const state = {};
-      for (const key of ENTITY_KEYS) state[key] = await this.remote.getCollection(key);
+      const tasks = ENTITY_KEYS.map(async (key) => {
+        state[key] = await this.remote.getCollection(key);
+      });
+      await Promise.all(tasks);
       return state;
     }
 

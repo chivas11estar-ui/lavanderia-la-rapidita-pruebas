@@ -2010,9 +2010,9 @@ function renderClients() {
 
   elements.clientsList.innerHTML = clients.map((client) => {
     const orders = state.orders.filter((order) => order.customerId === client.id);
-    const currentOrders = orders.filter((order) => isVisibleInOrdersList(order) || !order.paid);
-    const active = orders.filter(isActiveOrder).length;
-    const total = currentOrders.filter((order) => !order.paid).reduce((sum, order) => sum + order.total, 0);
+    const currentOrders = orders.filter((order) => isVisibleInOrdersList(order));
+    const active = orders.filter(isActiveOrder).filter(isVisibleInOrdersList).length;
+    const total = orders.filter((order) => !order.paid && isVisibleInOrdersList(order)).reduce((sum, order) => sum + order.total, 0);
     return `
       <article class="order-card">
         <div class="order-icon" aria-hidden="true"><i data-lucide="circle-user"></i></div>
@@ -2217,6 +2217,9 @@ function isCurrentMonth(value, reference = new Date()) {
 }
 
 function isVisibleInOrdersList(order) {
+  // Si el pedido no está pagado, debe ser visible siempre para poder registrar el pago
+  if (!order.paid) return true;
+
   const status = normalizeStatus(order.status);
   const createdAt = new Date(order.createdAt);
   const cutoffDate = new Date(2026, 8, 1); // 1 de Septiembre

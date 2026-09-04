@@ -960,14 +960,19 @@ async function initializeSync(user) {
   updatePreview();
   updateLiveWeather();
 
-  // AUTO-FIX: Corregir pedidos de agosto en segundo plano (sin bloquear al usuario)
-  const cutoff = new Date("2026-09-01T00:00:00");
-  const toFix = state.orders.filter(o => new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid));
+  // AUTO-FIX: Corregir pedidos antiguos (Julio/Agosto) de forma agresiva
+  const cutoff = new Date(2026, 8, 1); // 1 de Septiembre
+  const oldOrders = state.orders.filter(o => {
+    const d = new Date(o.createdAt);
+    return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
+  });
 
-  if (toFix.length > 0) {
-    mutate((next) => {
+  if (oldOrders.length > 0) {
+    console.log(`[Auto-Fix] Encontrados ${oldOrders.length} pedidos antiguos para cerrar.`);
+    await mutate((next) => {
       next.orders.forEach(o => {
-        if (new Date(o.createdAt) < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid)) {
+        const d = new Date(o.createdAt);
+        if (d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid)) {
           o.status = "entregado";
           o.paid = true;
           o.paidAt = o.createdAt;
@@ -975,7 +980,7 @@ async function initializeSync(user) {
           o.updatedAt = new Date().toISOString();
         }
       });
-    }).catch(err => console.warn("Error en auto-fix silencioso:", err));
+    });
   }
 }
 
@@ -2213,14 +2218,20 @@ function isCurrentMonth(value, reference = new Date()) {
 
 function isVisibleInOrdersList(order) {
   const status = normalizeStatus(order.status);
-
-  // Limpieza de migración: Ocultar pedidos antiguos que no fueron entregados/pagados antes de Septiembre
   const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date("2026-09-01T00:00:00");
-  if (createdAt < cutoffDate && (status !== "entregado" || !order.paid)) {
+  const cutoffDate = new Date(2026, 8, 1); // 1 de Septiembre
+
+  // Si es un pedido viejo (Julio/Agosto)
+  if (createdAt < cutoffDate) {
+    // Solo mostrar si YA está entregado Y pagado, Y fue hoy (historial de hoy)
+    if (status === "entregado" && order.paid) {
+      return isToday(order.deliveredAt || order.createdAt);
+    }
+    // Si no está entregado/pagado, el Auto-Fix lo cerrará, pero mientras tanto lo ocultamos
     return false;
   }
 
+  // Para pedidos nuevos (Septiembre en adelante)
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

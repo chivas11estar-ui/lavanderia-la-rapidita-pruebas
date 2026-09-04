@@ -621,7 +621,7 @@
       return document;
     }
 
-    async startRealtimeListeners({ waitForInitialSnapshots = true } = {}) {
+    async startRealtimeListeners({ waitForInitialSnapshots = false } = {}) {
       if (!this.realtime) {
         this.realtimeReady = true;
         this.setConnectionState("REALTIME_READY", { listeners: 0 });

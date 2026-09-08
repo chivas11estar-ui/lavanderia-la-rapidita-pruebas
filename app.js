@@ -1037,8 +1037,8 @@ async function initializeSync(user) {
   updatePreview();
   updateLiveWeather();
 
-  // AUTO-FIX: Corregir pedidos antiguos (Julio/Agosto) de forma agresiva
-  const cutoff = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
+  // AUTO-FIX: Corregir pedidos antiguos (antes de Septiembre 2026) de forma agresiva
+  const cutoff = new Date(2026, 8, 1); // 1 de Septiembre 2026 - Pedidos anteriores a esta fecha
   const oldOrders = state.orders.filter(o => {
     const d = new Date(o.createdAt);
     return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
@@ -1059,6 +1059,22 @@ async function initializeSync(user) {
       });
     });
   }
+  
+  // FIX: Eliminar gastos duplicados por timestamp y monto idéntico
+  const seenExpenses = new Set();
+  await mutate((next) => {
+    const uniqueExpenses = [];
+    next.expenses.forEach(expense => {
+      const key = `${expense.amount}-${expense.createdAt}-${expense.concept}`;
+      if (!seenExpenses.has(key)) {
+        seenExpenses.add(key);
+        uniqueExpenses.push(expense);
+      } else {
+        console.log(`[Dedup] Eliminando gasto duplicado: ${expense.concept} - ${expense.amount}`);
+      }
+    });
+    next.expenses = uniqueExpenses;
+  });
 }
 
 function normalizeExpenses(expenses) {
@@ -2299,9 +2315,9 @@ function isVisibleInOrdersList(order) {
 
   const status = normalizeStatus(order.status);
   const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
+  const cutoffDate = new Date(2026, 8, 1); // 1 de Septiembre 2026 - Pedidos anteriores a esta fecha
 
-  // Si es un pedido viejo (antes de Septiembre 2025)
+  // Si es un pedido viejo (antes de Septiembre 2026)
   if (createdAt < cutoffDate) {
     // Solo mostrar si YA está entregado Y pagado, Y fue hoy (historial de hoy)
     if (status === "entregado" && order.paid) {
@@ -2311,7 +2327,7 @@ function isVisibleInOrdersList(order) {
     return false;
   }
 
-  // Para pedidos nuevos (Septiembre 2025 en adelante)
+  // Para pedidos nuevos (Septiembre 2026 en adelante)
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

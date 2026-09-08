@@ -16,9 +16,23 @@ const FIREBASE_CONFIG = {
   appId: "1:829510239780:web:2ceb429db22895ef3cbab1",
 };
 
-// Inicializar Firebase
-firebase.initializeApp(FIREBASE_CONFIG);
-const cloudDatabase = firebase.firestore();
+// Inicializar Firebase cuando esté disponible
+let cloudDatabase = null;
+
+function initializeFirebase() {
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
+    cloudDatabase = firebase.firestore();
+    return true;
+  } catch (error) {
+    console.error("Error al inicializar Firebase:", error);
+    return false;
+  }
+}
+
+initializeFirebase();
 
 const STATUS_FLOW = ["recibido", "lavando", "secando", "doblando", "listo", "entregado"];
 const STATUS_LABELS = {
@@ -279,12 +293,43 @@ elements.loginGoogleButton.addEventListener("click", async () => {
   elements.loginMessage.textContent = "Conectando...";
 
   try {
+    // Verificar que Firebase esté inicializado
+    if (!firebase.apps.length) {
+      initializeFirebase();
+    }
+    
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    await firebase.auth().signInWithPopup(provider);
+    const result = await firebase.auth().signInWithPopup(provider);
+    
+    // Verificar email autorizado inmediatamente después del login
+    const user = result.user;
+    const userEmail = (user.email || "").toLowerCase();
+    
+    if (!AUTHORIZED_EMAILS.includes(userEmail)) {
+      await firebase.auth().signOut();
+      elements.loginMessage.textContent = `La cuenta ${userEmail} no está autorizada. Usa chivas11estar@gmail.com o karlyanbm@gmail.com.`;
+      elements.loginGoogleButton.disabled = false;
+      return;
+    }
+    
+    elements.loginMessage.textContent = "Inicio de sesión exitoso...";
   } catch (error) {
     console.error("No se pudo iniciar sesion.", error);
-    elements.loginMessage.textContent = "No se pudo iniciar con Google. Intenta de nuevo.";
+    let errorMsg = "No se pudo iniciar con Google. Intenta de nuevo.";
+    
+    // Manejar errores específicos de autenticación
+    if (error.code === 'auth/popup-closed-by-user') {
+      errorMsg = "Ventana cerrada. Intenta de nuevo.";
+    } else if (error.code === 'auth/popup-blocked') {
+      errorMsg = "Ventana emergente bloqueada. Permite popups para este sitio.";
+    } else if (error.code === 'auth/network-request-failed') {
+      errorMsg = "Error de conexión. Verifica tu internet.";
+    } else if (error.code === 'auth/unauthorized-domain') {
+      errorMsg = "Dominio no autorizado. Contacta al administrador.";
+    }
+    
+    elements.loginMessage.textContent = errorMsg;
     elements.loginGoogleButton.disabled = false;
   }
 });
@@ -2647,6 +2692,11 @@ function escapeHtml(value) {
 }
 
 async function initializeApp() {
+  // Verificar que Firebase esté inicializado antes de usar auth
+  if (!firebase.apps.length) {
+    initializeFirebase();
+  }
+
   firebase.auth().onAuthStateChanged(async (user) => {
     if (user && !AUTHORIZED_EMAILS.includes((user.email || "").toLowerCase())) {
       await firebase.auth().signOut();

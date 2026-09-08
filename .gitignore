@@ -1,4 +1,3 @@
-```gitignore
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -9,6 +8,9 @@ __pycache__/
 *.so
 *.a
 *.out
+dist/
+build/
+target/
 
 # Dependencies
 node_modules/
@@ -27,6 +29,8 @@ venv/
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # System files
 .DS_Store
@@ -36,6 +40,10 @@ Thumbs.db
 coverage/
 htmlcov/
 .coverage
+
+# Python specific
+.mypy_cache/
+.pytest_cache/
 
 # Compressed files
 *.zip
@@ -60,4 +68,9 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
+# Gradle
+.gradle/
+
+# Java
+*.class

@@ -472,20 +472,24 @@ elements.serviceForm.addEventListener("submit", async (event) => {
   isSubmittingService = true;
 
   try {
-  event.preventDefault();
-
-  await mutate((next) => {
-    next.services.unshift({
-      id: createId(),
-      name: elements.serviceName.value.trim(),
-      price: Number(elements.servicePrice.value),
-      unit: elements.serviceUnit.value,
-      description: elements.serviceDescription.value.trim() || "Servicio de lavanderia",
-      active: true,
+    await mutate((next) => {
+      next.services.unshift({
+        id: createId(),
+        name: elements.serviceName.value.trim(),
+        price: Number(elements.servicePrice.value),
+        unit: elements.serviceUnit.value,
+        description: elements.serviceDescription.value.trim() || "Servicio de lavanderia",
+        active: true,
+      });
     });
-  });
 
-  elements.serviceForm.reset();
+    elements.serviceForm.reset();
+  } catch (error) {
+    console.error("Error al guardar servicio:", error);
+    alert("Error al guardar el servicio. Inténtalo de nuevo.");
+  } finally {
+    isSubmittingService = false;
+  }
 });
 
 elements.expenseForm.addEventListener("submit", async (event) => {
@@ -494,30 +498,32 @@ elements.expenseForm.addEventListener("submit", async (event) => {
   if (isSubmittingExpense) return;
   isSubmittingExpense = true;
 
-  const expense = buildExpenseFromForm();
-  if (!expense) return;
+  try {
+    const expense = buildExpenseFromForm();
+    if (!expense) return;
 
-  elements.expenseSubmitButton.disabled = true;
-  elements.expenseSubmitButton.textContent = "Guardando...";
+    elements.expenseSubmitButton.disabled = true;
+    elements.expenseSubmitButton.textContent = "Guardando...";
 
-  await mutate((next) => {
-    next.expenses.unshift(expense);
-    applyInventoryFromExpense(next, expense);
-  });
+    await mutate((next) => {
+      next.expenses.unshift(expense);
+      applyInventoryFromExpense(next, expense);
+    });
 
-  elements.expenseForm.reset();
-  elements.newExpenseContainer.hidden = true;
-  setExpenseCategory(currentExpenseCategory);
-  renderCustomerSelect();
-  renderExpenseSelect();
-      elements.expenseSubmitButton.disabled = false;
+    elements.expenseForm.reset();
+    elements.newExpenseContainer.hidden = true;
+    setExpenseCategory(currentExpenseCategory);
+    renderCustomerSelect();
+    renderExpenseSelect();
+  } catch (error) {
+    console.error("Error al guardar gasto:", error);
+    alert("Error al guardar el gasto. Inténtalo de nuevo.");
+  } finally {
+    elements.expenseSubmitButton.disabled = false;
     elements.expenseSubmitButton.innerHTML = '<i data-lucide="plus"></i>Guardar salida';
     renderIcons();
-  } finally {
     isSubmittingExpense = false;
   }
-  elements.expenseSubmitButton.innerHTML = '<i data-lucide="plus"></i>Guardar salida';
-    });
 });
 
 elements.supplyForm?.addEventListener("submit", async (event) => {

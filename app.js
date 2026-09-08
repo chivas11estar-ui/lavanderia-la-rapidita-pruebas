@@ -1081,26 +1081,39 @@ async function initializeSync(user) {
 }
 
 function normalizeExpenses(expenses) {
-  return (Array.isArray(expenses) ? expenses : []).map((expense) => {
-    const category = EXPENSE_CATEGORIES[expense.category] ? expense.category : "operativo";
-    const paymentMethod = PAYMENT_METHODS[expense.paymentMethod] ? expense.paymentMethod : "efectivo";
-    const concept = String(expense.concept || expense.name || CATEGORY_DEFAULT_CONCEPTS[category] || "Gasto").trim();
-    return {
-      ...expense,
-      id: expense.id || createId(),
-      name: expense.name || concept,
-      concept,
-      amount: Number(expense.amount || 0),
-      category,
-      paymentMethod,
-      supplyId: expense.supplyId || null,
-      purchasedQuantity: expense.purchasedQuantity == null ? null : Number(expense.purchasedQuantity || 0),
-      purchasedUnit: expense.purchasedUnit || null,
-      notes: expense.notes || "",
-      createdAt: expense.createdAt || new Date().toISOString(),
-      updatedAt: expense.updatedAt || expense.createdAt || new Date().toISOString(),
-    };
-  });
+  const seen = new Set();
+  return (Array.isArray(expenses) ? expenses : [])
+    .map((expense) => {
+      const category = EXPENSE_CATEGORIES[expense.category] ? expense.category : "operativo";
+      const paymentMethod = PAYMENT_METHODS[expense.paymentMethod] ? expense.paymentMethod : "efectivo";
+      const concept = String(expense.concept || expense.name || CATEGORY_DEFAULT_CONCEPTS[category] || "Gasto").trim();
+      return {
+        ...expense,
+        id: expense.id || createId(),
+        name: expense.name || concept,
+        concept,
+        amount: Number(expense.amount || 0),
+        category,
+        paymentMethod,
+        supplyId: expense.supplyId || null,
+        purchasedQuantity: expense.purchasedQuantity == null ? null : Number(expense.purchasedQuantity || 0),
+        purchasedUnit: expense.purchasedUnit || null,
+        notes: expense.notes || "",
+        createdAt: expense.createdAt || new Date().toISOString(),
+        updatedAt: expense.updatedAt || expense.createdAt || new Date().toISOString(),
+      };
+    })
+    .filter((expense) => {
+      // Eliminar duplicados basados en monto, concepto y fecha (día)
+      const expenseDate = new Date(expense.createdAt).toISOString().split('T')[0];
+      const key = `${expense.amount}-${expenseDate}-${expense.concept}`.toLowerCase().replace(/\s+/g, '');
+      if (seen.has(key)) {
+        console.log(`[Dedup normalizeExpenses] Eliminando gasto duplicado: ${expense.concept} - ${expense.amount} - ${expenseDate}`);
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 }
 
 function normalizeSupplies(supplies) {
@@ -1224,15 +1237,27 @@ function normalizeOrder(order, services) {
   };
   const service = services.find((item) => item.id === order.serviceId) || services[0];
 
+  // AUTO-FIX: Marcar como entregado si la fecha de creación es anterior a hoy
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const orderDate = new Date(order.createdAt);
+  let finalStatus = statusMap[order.status] || order.status || "recibido";
+  
+  // Si el pedido es de antes de hoy y no está entregado, marcarlo como entregado
+  if (orderDate < todayStart && finalStatus !== "entregado") {
+    console.log(`[Auto-Fix Order] Pedido ${order.id} de fecha ${orderDate.toISOString()} marcado como entregado`);
+    finalStatus = "entregado";
+  }
+
   const normalized = {
     ...order,
     serviceId: order.serviceId || service.id,
     serviceName: order.serviceName || service.name,
     unit: order.unit || service.unit,
-    status: statusMap[order.status] || order.status || "recibido",
-    paid: Boolean(order.paid),
-    paidAt: order.paidAt || null,
-    deliveredAt: order.deliveredAt || null,
+    status: finalStatus,
+    paid: Boolean(order.paid) || (finalStatus === "entregado"),
+    paidAt: order.paidAt || (finalStatus === "entregado" ? order.createdAt : null),
+    deliveredAt: order.deliveredAt || (finalStatus === "entregado" ? order.createdAt : null),
   };
   const rawItems = Array.isArray(order.items) && order.items.length
     ? order.items
@@ -1316,7 +1341,8 @@ function buildExpenseFromForm() {
 
   if ((category === "insumo" || category === "gas") && (!supply || !Number.isFinite(purchasedQuantity) || purchasedQuantity <= 0)) return null;
 
-  const id = createId();
+  // FIX: Generar ID único verificando que no exista
+  const id = createUniqueExpenseId(state.expenses);
   return {
     id,
     name: concept,
@@ -2550,6 +2576,17 @@ function roundUpToPeso(amount) {
 function createId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// FIX: Prevenir duplicados exactos en el mismo momento
+function createUniqueExpenseId(existingExpenses) {
+  let newId;
+  let attempts = 0;
+  do {
+    newId = createId();
+    attempts++;
+  } while (existingExpenses.some(e => e.id === newId) && attempts < 10);
+  return newId;
 }
 
 function isToday(isoDate) {

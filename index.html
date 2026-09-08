@@ -496,7 +496,12 @@
       </form>
     </dialog>
 
-    <template id="emptyOrdersTemplate"><div class="empty-state"><i data-lucide="washing-machine"></i><strong>No hay pedidos visibles</strong><span>Los entregados de mas de una semana se guardan, pero ya no estorban aqui.</span></div></template>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+    <script src="sync-v2.js"></script>
+    <script src="supply-learning-v2.js"></script>
+    <script src="app.js?v=33"></script>
     <script>
       if ("serviceWorker" in navigator && ["http:", "https:"].includes(location.protocol)) {
         window.addEventListener("load", () => {
@@ -506,11 +511,5 @@
         });
       }
     </script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-    <script src="sync-v2.js"></script>
-    <script src="supply-learning-v2.js"></script>
-    <script src="app.js?v=32"></script>
   </body>
 </html>

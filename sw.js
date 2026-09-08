@@ -1,9 +1,9 @@
-const CACHE_NAME = "la-rapidita-v32";
+const CACHE_NAME = "la-rapidita-v33";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=32",
-  "./app.js?v=32",
+  "./app.js?v=33",
   "./manifest.webmanifest",
   "./assets/logo-la-rapidita.jpeg",
   "./assets/icon-180.png",

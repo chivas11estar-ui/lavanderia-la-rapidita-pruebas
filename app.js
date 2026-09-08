@@ -113,6 +113,10 @@ let appendToOrderId = null;
 let weatherController = null;
 let currentExpenseCategory = "insumo";
 let syncState = "synced";
+let isSubmittingOrder = false;
+let isSubmittingExpense = false;
+let isSubmittingService = false;
+let isSubmittingSupply = false;
 
 const WEATHER_CACHE_KEY = "la-rapidita-weather-v1";
 const WEATHER_DEFAULT_LOCATION = { latitude: 19.4326, longitude: -99.1332, label: "clima de referencia" };
@@ -330,69 +334,77 @@ elements.expenseSupplySelect?.addEventListener("change", syncExpenseSupplyFields
 elements.orderForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const service = getSelectedService();
-  const quantity = Number(elements.weightKg.value);
-  const price = Number(elements.pricePerKg.value);
-  const subtotal = quantity * price;
-  const total = roundUpToPeso(subtotal);
-  const item = {
-    id: createId(), serviceId: service.id, serviceName: service.name, unit: service.unit,
-    weightKg: quantity, pricePerKg: price, subtotal, total,
-  };
+  // Prevenir múltiples envíos
+  if (isSubmittingOrder) return;
+  isSubmittingOrder = true;
 
-  await mutate((next) => {
-    if (appendToOrderId) {
-      const order = next.orders.find((entry) => entry.id === appendToOrderId);
-      if (order && normalizeStatus(order.status) !== "entregado") {
-        order.items = [...getOrderItems(order), item];
-        syncOrderTotalsFromItems(order);
-        const extraNotes = elements.notes.value.trim();
-        if (extraNotes) order.notes = [order.notes, extraNotes].filter(Boolean).join(" · ");
-        order.paid = false;
-        order.paidAt = null;
-        order.updatedAt = new Date().toISOString();
+  try {
+    const service = getSelectedService();
+    const quantity = Number(elements.weightKg.value);
+    const price = Number(elements.pricePerKg.value);
+    const subtotal = quantity * price;
+    const total = roundUpToPeso(subtotal);
+    const item = {
+      id: createId(), serviceId: service.id, serviceName: service.name, unit: service.unit,
+      weightKg: quantity, pricePerKg: price, subtotal, total,
+    };
+
+    await mutate((next) => {
+      if (appendToOrderId) {
+        const order = next.orders.find((entry) => entry.id === appendToOrderId);
+        if (order && normalizeStatus(order.status) !== "entregado") {
+          order.items = [...getOrderItems(order), item];
+          syncOrderTotalsFromItems(order);
+          const extraNotes = elements.notes.value.trim();
+          if (extraNotes) order.notes = [order.notes, extraNotes].filter(Boolean).join(" · ");
+          order.paid = false;
+          order.paidAt = null;
+          order.updatedAt = new Date().toISOString();
+        }
+        return;
       }
-      return;
-    }
 
-    let typedCustomerName = "";
-    if (elements.customerSelect.value === "NEW_CUSTOMER") {
-      typedCustomerName = elements.customerName.value.trim().replace(/\s+/g, " ");
-    } else {
-      typedCustomerName = elements.customerSelect.value;
-    }
+      let typedCustomerName = "";
+      if (elements.customerSelect.value === "NEW_CUSTOMER") {
+        typedCustomerName = elements.customerName.value.trim().replace(/\s+/g, " ");
+      } else {
+        typedCustomerName = elements.customerSelect.value;
+      }
 
-    if (!typedCustomerName) {
-      throw new Error("Por favor selecciona o escribe un cliente.");
-    }
+      if (!typedCustomerName) {
+        throw new Error("Por favor selecciona o escribe un cliente.");
+      }
 
-    let customer = next.customers.find((item) => normalizeCustomerKey(item.name) === normalizeCustomerKey(typedCustomerName));
-    if (!customer) {
-      customer = { id: createId(), name: typedCustomerName, phone: normalizePhone(elements.customerPhone.value), createdAt: new Date().toISOString() };
-      next.customers.unshift(customer);
-    }
+      let customer = next.customers.find((item) => normalizeCustomerKey(item.name) === normalizeCustomerKey(typedCustomerName));
+      if (!customer) {
+        customer = { id: createId(), name: typedCustomerName, phone: normalizePhone(elements.customerPhone.value), createdAt: new Date().toISOString() };
+        next.customers.unshift(customer);
+      }
 
-    next.orders.unshift({
-      id: createId(),
-      customerId: customer.id,
-      customerName: customer.name,
-      customerPhone: customer.phone || "",
-      serviceId: service.id,
-      serviceName: service.name,
-      unit: service.unit,
-      weightKg: quantity,
-      pricePerKg: price,
-      subtotal,
-      total,
-      items: [item],
-      status: "recibido",
-      paid: false,
-      notes: elements.notes.value.trim(),
-      createdAt: new Date().toISOString(),
+      next.orders.unshift({
+        id: createId(),
+        customerId: customer.id,
+        customerName: customer.name,
+        customerPhone: customer.phone || "",
+        serviceId: service.id,
+        serviceName: service.name,
+        unit: service.unit,
+        weightKg: quantity,
+        pricePerKg: price,
+        subtotal,
+        total,
+        items: [item],
+        status: "recibido",
+        paid: false,
+        notes: elements.notes.value.trim(),
+        createdAt: new Date().toISOString(),
+      });
     });
-  });
 
-  finishOrderForm();
+    finishOrderForm();
+  } finally {
+    isSubmittingOrder = false;
+  }
 });
 
 function finishOrderForm() {
@@ -409,6 +421,12 @@ function finishOrderForm() {
 }
 
 elements.serviceForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (isSubmittingService) return;
+  isSubmittingService = true;
+
+  try {
   event.preventDefault();
 
   await mutate((next) => {
@@ -428,6 +446,9 @@ elements.serviceForm.addEventListener("submit", async (event) => {
 elements.expenseForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
+  if (isSubmittingExpense) return;
+  isSubmittingExpense = true;
+
   const expense = buildExpenseFromForm();
   if (!expense) return;
 
@@ -444,9 +465,14 @@ elements.expenseForm.addEventListener("submit", async (event) => {
   setExpenseCategory(currentExpenseCategory);
   renderCustomerSelect();
   renderExpenseSelect();
-  elements.expenseSubmitButton.disabled = false;
+      elements.expenseSubmitButton.disabled = false;
+    elements.expenseSubmitButton.innerHTML = '<i data-lucide="plus"></i>Guardar salida';
+    renderIcons();
+  } finally {
+    isSubmittingExpense = false;
+  }
   elements.expenseSubmitButton.innerHTML = '<i data-lucide="plus"></i>Guardar salida';
-  renderIcons();
+    });
 });
 
 elements.supplyForm?.addEventListener("submit", async (event) => {
@@ -961,7 +987,7 @@ async function initializeSync(user) {
   updateLiveWeather();
 
   // AUTO-FIX: Corregir pedidos antiguos (Julio/Agosto) de forma agresiva
-  const cutoff = new Date(2026, 8, 1); // 1 de Septiembre
+  const cutoff = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
   const oldOrders = state.orders.filter(o => {
     const d = new Date(o.createdAt);
     return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
@@ -2222,9 +2248,9 @@ function isVisibleInOrdersList(order) {
 
   const status = normalizeStatus(order.status);
   const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date(2026, 8, 1); // 1 de Septiembre
+  const cutoffDate = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
 
-  // Si es un pedido viejo (Julio/Agosto)
+  // Si es un pedido viejo (antes de Septiembre 2025)
   if (createdAt < cutoffDate) {
     // Solo mostrar si YA está entregado Y pagado, Y fue hoy (historial de hoy)
     if (status === "entregado" && order.paid) {
@@ -2234,7 +2260,7 @@ function isVisibleInOrdersList(order) {
     return false;
   }
 
-  // Para pedidos nuevos (Septiembre en adelante)
+  // Para pedidos nuevos (Septiembre 2025 en adelante)
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

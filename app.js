@@ -1037,13 +1037,14 @@ async function initializeSync(user) {
   updatePreview();
   updateLiveWeather();
 
-  // AUTO-FIX: Corregir pedidos antiguos (Julio/Agosto) de forma agresiva
-  const cutoff = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
+  // AUTO-FIX: Corregir pedidos antiguos - usa fecha actual dinámica
+  const today = new Date();
+  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
   const oldOrders = state.orders.filter(o => {
     const d = new Date(o.createdAt);
     return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
   });
-
+  
   if (oldOrders.length > 0) {
     console.log(`[Auto-Fix] Encontrados ${oldOrders.length} pedidos antiguos para cerrar.`);
     await mutate((next) => {
@@ -1059,6 +1060,24 @@ async function initializeSync(user) {
       });
     });
   }
+  
+  // FIX: Eliminar gastos duplicados por monto, concepto y fecha (más robusto)
+  const seenExpenses = new Set();
+  await mutate((next) => {
+    const uniqueExpenses = [];
+    next.expenses.forEach(expense => {
+      // Crear clave única basada en monto, concepto y día (no hora exacta)
+      const expenseDate = new Date(expense.createdAt).toISOString().split('T')[0];
+      const key = `${expense.amount}-${expenseDate}-${(expense.concept || expense.name || '')}`.toLowerCase().replace(/\s+/g, '');
+      if (!seenExpenses.has(key)) {
+        seenExpenses.add(key);
+        uniqueExpenses.push(expense);
+      } else {
+        console.log(`[Dedup] Eliminando gasto duplicado: ${expense.concept || expense.name} - ${expense.amount} - ${expenseDate}`);
+      }
+    });
+    next.expenses = uniqueExpenses;
+  });
 }
 
 function normalizeExpenses(expenses) {
@@ -2299,19 +2318,18 @@ function isVisibleInOrdersList(order) {
 
   const status = normalizeStatus(order.status);
   const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date(2025, 7, 31); // 31 de Agosto 2025 - SOLO pedidos muy antiguos
+  const today = new Date();
+  const cutoffDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
 
-  // Si es un pedido viejo (antes de Septiembre 2025)
+  // Si es un pedido viejo (antes de hoy), solo mostrar si ya está entregado y pagado
   if (createdAt < cutoffDate) {
-    // Solo mostrar si YA está entregado Y pagado, Y fue hoy (historial de hoy)
     if (status === "entregado" && order.paid) {
       return isToday(order.deliveredAt || order.createdAt);
     }
-    // Si no está entregado/pagado, el Auto-Fix lo cerrará, pero mientras tanto lo ocultamos
     return false;
   }
 
-  // Para pedidos nuevos (Septiembre 2025 en adelante)
+  // Para pedidos nuevos (Septiembre 2026 en adelante)
   if (status !== "entregado") return true;
   const referenceDate = new Date(order.deliveredAt || order.createdAt);
   return isToday(referenceDate);

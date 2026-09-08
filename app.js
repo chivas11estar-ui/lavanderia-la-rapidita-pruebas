@@ -1037,13 +1037,14 @@ async function initializeSync(user) {
   updatePreview();
   updateLiveWeather();
 
-  // AUTO-FIX: Corregir pedidos antiguos (antes de Septiembre 2026) de forma agresiva
-  const cutoff = new Date(2026, 8, 1); // 1 de Septiembre 2026 - Pedidos anteriores a esta fecha
+  // AUTO-FIX: Corregir pedidos antiguos - usa fecha actual dinámica
+  const today = new Date();
+  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
   const oldOrders = state.orders.filter(o => {
     const d = new Date(o.createdAt);
     return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
   });
-
+  
   if (oldOrders.length > 0) {
     console.log(`[Auto-Fix] Encontrados ${oldOrders.length} pedidos antiguos para cerrar.`);
     await mutate((next) => {
@@ -1060,17 +1061,19 @@ async function initializeSync(user) {
     });
   }
   
-  // FIX: Eliminar gastos duplicados por timestamp y monto idéntico
+  // FIX: Eliminar gastos duplicados por monto, concepto y fecha (más robusto)
   const seenExpenses = new Set();
   await mutate((next) => {
     const uniqueExpenses = [];
     next.expenses.forEach(expense => {
-      const key = `${expense.amount}-${expense.createdAt}-${expense.concept}`;
+      // Crear clave única basada en monto, concepto y día (no hora exacta)
+      const expenseDate = new Date(expense.createdAt).toISOString().split('T')[0];
+      const key = `${expense.amount}-${expenseDate}-${(expense.concept || expense.name || '')}`.toLowerCase().replace(/\s+/g, '');
       if (!seenExpenses.has(key)) {
         seenExpenses.add(key);
         uniqueExpenses.push(expense);
       } else {
-        console.log(`[Dedup] Eliminando gasto duplicado: ${expense.concept} - ${expense.amount}`);
+        console.log(`[Dedup] Eliminando gasto duplicado: ${expense.concept || expense.name} - ${expense.amount} - ${expenseDate}`);
       }
     });
     next.expenses = uniqueExpenses;
@@ -2315,15 +2318,14 @@ function isVisibleInOrdersList(order) {
 
   const status = normalizeStatus(order.status);
   const createdAt = new Date(order.createdAt);
-  const cutoffDate = new Date(2026, 8, 1); // 1 de Septiembre 2026 - Pedidos anteriores a esta fecha
+  const today = new Date();
+  const cutoffDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
 
-  // Si es un pedido viejo (antes de Septiembre 2026)
+  // Si es un pedido viejo (antes de hoy), solo mostrar si ya está entregado y pagado
   if (createdAt < cutoffDate) {
-    // Solo mostrar si YA está entregado Y pagado, Y fue hoy (historial de hoy)
     if (status === "entregado" && order.paid) {
       return isToday(order.deliveredAt || order.createdAt);
     }
-    // Si no está entregado/pagado, el Auto-Fix lo cerrará, pero mientras tanto lo ocultamos
     return false;
   }
 

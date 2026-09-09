@@ -1686,6 +1686,10 @@ function getIconMarkup(name) {
 }
 
 function renderServicesSelect() {
+  const previousSelectedId = elements.serviceSelect.value;
+  const previousService = state.services.find((s) => s.id === previousSelectedId);
+  const wasPreviouslyInactive = previousService && !previousService.active;
+
   const activeServices = state.services.filter((service) => service.active);
   const options = (activeServices.length ? activeServices : state.services).map((service) => {
     return `<option value="${service.id}">${escapeHtml(service.name)} - ${moneyFormatter.format(service.price)} / ${service.unit}</option>`;
@@ -1694,15 +1698,24 @@ function renderServicesSelect() {
   elements.serviceSelect.innerHTML = options.join("");
   syncSelectedServicePrice();
   
-  // Mostrar aviso si no hay servicios activos
+  // Mostrar aviso si no hay servicios activos o si el seleccionado se desactivó
   const warningElement = document.getElementById("noActiveServicesWarning");
   const submitOrderButton = document.getElementById("submitOrderButton");
   if (warningElement && submitOrderButton) {
     if (activeServices.length === 0) {
+      warningElement.innerHTML = '<i data-lucide="alert-circle" style="width: 16px; height: 16px; display: inline; vertical-align: middle;"></i> No hay servicios activos. Actívalos en la pestaña Servicios antes de crear un pedido.';
       warningElement.style.display = "block";
       submitOrderButton.disabled = true;
       submitOrderButton.style.opacity = "0.5";
       submitOrderButton.style.cursor = "not-allowed";
+      renderIcons();
+    } else if (wasPreviouslyInactive) {
+      warningElement.innerHTML = `<i data-lucide="alert-circle" style="width: 16px; height: 16px; display: inline; vertical-align: middle;"></i> El servicio "${escapeHtml(previousService.name)}" ha sido desactivado. Se ha seleccionado otro automáticamente.`;
+      warningElement.style.display = "block";
+      submitOrderButton.disabled = false;
+      submitOrderButton.style.opacity = "1";
+      submitOrderButton.style.cursor = "pointer";
+      renderIcons();
     } else {
       warningElement.style.display = "none";
       submitOrderButton.disabled = false;

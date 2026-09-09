@@ -529,71 +529,84 @@ elements.expenseForm.addEventListener("submit", async (event) => {
 elements.supplyForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  await mutate((next) => {
-    const supply = next.supplies.find((item) => item.id === elements.supplySelect.value);
-    const type = elements.supplyMovementType.value === "usage" ? "usage" : "purchase";
-    const cost = Number(elements.supplyCost.value || 0);
-    const typedQuantity = Number(elements.supplyQuantity.value || 0);
-    const unitPrice = type === "purchase" && cost > 0 && typedQuantity > 0
-      ? cost / typedQuantity
-      : Number(elements.supplyUnitPrice.value || 0);
-    const piecesPerUnit = Number(elements.supplyPiecesPerUnit.value || 0);
-    const quantity = calculateSupplyMovementQuantity(supply, {
-      rawQuantity: elements.supplyQuantity.value,
-      cost,
-      unitPrice,
-      piecesPerUnit,
-      type,
-    });
-    if (!supply || !Number.isFinite(quantity) || quantity <= 0) return;
+  // Prevenir múltiples envíos
+  if (isSubmittingSupply) return;
+  isSubmittingSupply = true;
 
-    if (type === "purchase") {
-      if (unitPrice > 0) supply.purchaseUnitPrice = unitPrice;
-      if (piecesPerUnit > 0) supply.piecesPerPurchaseUnit = piecesPerUnit;
-    }
+  try {
+    const submitButton = elements.supplySubmitButton;
+    if (submitButton) submitButton.disabled = true;
 
-    const movementId = createId();
-    next.supplyMovements.unshift({
-      id: movementId,
-      supplyId: supply.id,
-      type,
-      quantity,
-      cost: type === "purchase" ? cost : 0,
-      unitPrice: type === "purchase" ? unitPrice : 0,
-      piecesPerUnit: type === "purchase" ? piecesPerUnit : 0,
-      createdAt: new Date().toISOString(),
-      note: type === "purchase" ? "Compra registrada desde inventario" : "Uso registrado desde inventario",
-    });
+    await mutate((next) => {
+      const supply = next.supplies.find((item) => item.id === elements.supplySelect.value);
+      const type = elements.supplyMovementType.value === "usage" ? "usage" : "purchase";
+      const cost = Number(elements.supplyCost.value || 0);
+      const typedQuantity = Number(elements.supplyQuantity.value || 0);
+      const unitPrice = type === "purchase" && cost > 0 && typedQuantity > 0
+        ? cost / typedQuantity
+        : Number(elements.supplyUnitPrice.value || 0);
+      const piecesPerUnit = Number(elements.supplyPiecesPerUnit.value || 0);
+      const quantity = calculateSupplyMovementQuantity(supply, {
+        rawQuantity: elements.supplyQuantity.value,
+        cost,
+        unitPrice,
+        piecesPerUnit,
+        type,
+      });
+      if (!supply || !Number.isFinite(quantity) || quantity <= 0) return;
 
-    if (type === "purchase") {
-      const previousValue = Number(supply.quantity || 0) * Number(supply.averageCost || 0);
-      const nextQuantity = Number(supply.quantity || 0) + quantity;
-      supply.quantity = nextQuantity;
-      if (cost > 0 && nextQuantity > 0) supply.averageCost = (previousValue + cost) / nextQuantity;
-      if (cost > 0) {
-        const expenseId = createId();
-        next.expenses.unshift({
-          id: expenseId,
-          name: `Compra de ${supply.name}`,
-          concept: `Compra de ${supply.name}`,
-          amount: cost,
-          category: supply.id === "gas" ? "gas" : "insumo",
-          paymentMethod: "efectivo",
-          supplyId: supply.id,
-          purchasedQuantity: quantity,
-          purchasedUnit: supply.unit,
-          notes: "Registrado desde inventario",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        next.supplyMovements[0].expenseId = expenseId;
+      if (type === "purchase") {
+        if (unitPrice > 0) supply.purchaseUnitPrice = unitPrice;
+        if (piecesPerUnit > 0) supply.piecesPerPurchaseUnit = piecesPerUnit;
       }
-    } else {
-      supply.quantity = Math.max(0, Number(supply.quantity || 0) - quantity);
-    }
-  });
 
-  elements.supplyForm.reset();
+      const movementId = createId();
+      next.supplyMovements.unshift({
+        id: movementId,
+        supplyId: supply.id,
+        type,
+        quantity,
+        cost: type === "purchase" ? cost : 0,
+        unitPrice: type === "purchase" ? unitPrice : 0,
+        piecesPerUnit: type === "purchase" ? piecesPerUnit : 0,
+        createdAt: new Date().toISOString(),
+        note: type === "purchase" ? "Compra registrada desde inventario" : "Uso registrado desde inventario",
+      });
+
+      if (type === "purchase") {
+        const previousValue = Number(supply.quantity || 0) * Number(supply.averageCost || 0);
+        const nextQuantity = Number(supply.quantity || 0) + quantity;
+        supply.quantity = nextQuantity;
+        if (cost > 0 && nextQuantity > 0) supply.averageCost = (previousValue + cost) / nextQuantity;
+        if (cost > 0) {
+          const expenseId = createId();
+          next.expenses.unshift({
+            id: expenseId,
+            name: `Compra de ${supply.name}`,
+            concept: `Compra de ${supply.name}`,
+            amount: cost,
+            category: supply.id === "gas" ? "gas" : "insumo",
+            paymentMethod: "efectivo",
+            supplyId: supply.id,
+            purchasedQuantity: quantity,
+            purchasedUnit: supply.unit,
+            notes: "Registrado desde inventario",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          next.supplyMovements[0].expenseId = expenseId;
+        }
+      } else {
+        supply.quantity = Math.max(0, Number(supply.quantity || 0) - quantity);
+      }
+    });
+
+    elements.supplyForm.reset();
+  } finally {
+    const submitButton = elements.supplySubmitButton;
+    if (submitButton) submitButton.disabled = false;
+    isSubmittingSupply = false;
+  }
 });
 
 elements.supplySelect?.addEventListener("change", syncSupplyPurchaseFields);
@@ -1747,6 +1760,23 @@ function renderServicesSelect() {
 
   elements.serviceSelect.innerHTML = options.join("");
   syncSelectedServicePrice();
+  
+  // Mostrar aviso si no hay servicios activos
+  const warningElement = document.getElementById("noActiveServicesWarning");
+  const submitOrderButton = document.getElementById("submitOrderButton");
+  if (warningElement && submitOrderButton) {
+    if (activeServices.length === 0) {
+      warningElement.style.display = "block";
+      submitOrderButton.disabled = true;
+      submitOrderButton.style.opacity = "0.5";
+      submitOrderButton.style.cursor = "not-allowed";
+    } else {
+      warningElement.style.display = "none";
+      submitOrderButton.disabled = false;
+      submitOrderButton.style.opacity = "1";
+      submitOrderButton.style.cursor = "pointer";
+    }
+  }
 }
 
 function syncSelectedServicePrice() {

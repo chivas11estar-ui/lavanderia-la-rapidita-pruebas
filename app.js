@@ -382,6 +382,8 @@ elements.orderForm.addEventListener("submit", async (event) => {
   // Prevenir múltiples envíos
   if (isSubmittingOrder) return;
   isSubmittingOrder = true;
+  const submitButton = document.getElementById("submitOrderButton");
+  if (submitButton) submitButton.disabled = true;
 
   try {
     const service = getSelectedService();
@@ -447,7 +449,11 @@ elements.orderForm.addEventListener("submit", async (event) => {
     });
 
     finishOrderForm();
+  } catch (error) {
+    console.error("Error al guardar pedido:", error);
+    alert(error?.message || "Error al guardar el pedido. Inténtalo de nuevo.");
   } finally {
+    if (submitButton) submitButton.disabled = false;
     isSubmittingOrder = false;
   }
 });
@@ -502,6 +508,21 @@ elements.expenseForm.addEventListener("submit", async (event) => {
     const expense = buildExpenseFromForm();
     if (!expense) return;
 
+    // PREVENCIÓN DE DUPLICADOS: Si es insumo o gas, verificar si ya se registró una compra idéntica en los últimos 2 minutos
+    if (["insumo", "gas"].includes(expense.category) && expense.supplyId) {
+      const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+      const isDuplicate = state.expenses.some((e) => {
+        if (e.supplyId !== expense.supplyId) return false;
+        if (Math.abs(Number(e.amount) - Number(expense.amount)) > 0.01) return false;
+        const eTime = new Date(e.createdAt).getTime();
+        return eTime >= twoMinutesAgo;
+      });
+      if (isDuplicate) {
+        alert("Ya existe una compra reciente registrada para este insumo con el mismo monto en los últimos 2 minutos. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
+        return;
+      }
+    }
+
     elements.expenseSubmitButton.disabled = true;
     elements.expenseSubmitButton.textContent = "Guardando...";
 
@@ -529,71 +550,102 @@ elements.expenseForm.addEventListener("submit", async (event) => {
 elements.supplyForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  await mutate((next) => {
-    const supply = next.supplies.find((item) => item.id === elements.supplySelect.value);
+  // Prevenir múltiples envíos
+  if (isSubmittingSupply) return;
+  isSubmittingSupply = true;
+
+  try {
+    const submitButton = elements.supplySubmitButton;
+    if (submitButton) submitButton.disabled = true;
+
+    const supplyId = elements.supplySelect.value;
     const type = elements.supplyMovementType.value === "usage" ? "usage" : "purchase";
     const cost = Number(elements.supplyCost.value || 0);
-    const typedQuantity = Number(elements.supplyQuantity.value || 0);
-    const unitPrice = type === "purchase" && cost > 0 && typedQuantity > 0
-      ? cost / typedQuantity
-      : Number(elements.supplyUnitPrice.value || 0);
-    const piecesPerUnit = Number(elements.supplyPiecesPerUnit.value || 0);
-    const quantity = calculateSupplyMovementQuantity(supply, {
-      rawQuantity: elements.supplyQuantity.value,
-      cost,
-      unitPrice,
-      piecesPerUnit,
-      type,
-    });
-    if (!supply || !Number.isFinite(quantity) || quantity <= 0) return;
 
-    if (type === "purchase") {
-      if (unitPrice > 0) supply.purchaseUnitPrice = unitPrice;
-      if (piecesPerUnit > 0) supply.piecesPerPurchaseUnit = piecesPerUnit;
-    }
-
-    const movementId = createId();
-    next.supplyMovements.unshift({
-      id: movementId,
-      supplyId: supply.id,
-      type,
-      quantity,
-      cost: type === "purchase" ? cost : 0,
-      unitPrice: type === "purchase" ? unitPrice : 0,
-      piecesPerUnit: type === "purchase" ? piecesPerUnit : 0,
-      createdAt: new Date().toISOString(),
-      note: type === "purchase" ? "Compra registrada desde inventario" : "Uso registrado desde inventario",
-    });
-
-    if (type === "purchase") {
-      const previousValue = Number(supply.quantity || 0) * Number(supply.averageCost || 0);
-      const nextQuantity = Number(supply.quantity || 0) + quantity;
-      supply.quantity = nextQuantity;
-      if (cost > 0 && nextQuantity > 0) supply.averageCost = (previousValue + cost) / nextQuantity;
-      if (cost > 0) {
-        const expenseId = createId();
-        next.expenses.unshift({
-          id: expenseId,
-          name: `Compra de ${supply.name}`,
-          concept: `Compra de ${supply.name}`,
-          amount: cost,
-          category: supply.id === "gas" ? "gas" : "insumo",
-          paymentMethod: "efectivo",
-          supplyId: supply.id,
-          purchasedQuantity: quantity,
-          purchasedUnit: supply.unit,
-          notes: "Registrado desde inventario",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        next.supplyMovements[0].expenseId = expenseId;
+    // PREVENCIÓN DE DUPLICADOS: Si es compra desde inventario, verificar si ya se registró una compra idéntica en los últimos 2 minutos
+    if (type === "purchase" && supplyId) {
+      const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+      const isDuplicate = state.expenses.some((e) => {
+        if (e.supplyId !== supplyId) return false;
+        if (Math.abs(Number(e.amount) - cost) > 0.01) return false;
+        const eTime = new Date(e.createdAt).getTime();
+        return eTime >= twoMinutesAgo;
+      });
+      if (isDuplicate) {
+        alert("Ya existe una compra reciente registrada para este insumo con el mismo monto en los últimos 2 minutos. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
+        return;
       }
-    } else {
-      supply.quantity = Math.max(0, Number(supply.quantity || 0) - quantity);
     }
-  });
 
-  elements.supplyForm.reset();
+    await mutate((next) => {
+      const supply = next.supplies.find((item) => item.id === elements.supplySelect.value);
+      const cost = Number(elements.supplyCost.value || 0);
+      const typedQuantity = Number(elements.supplyQuantity.value || 0);
+      const unitPrice = type === "purchase" && cost > 0 && typedQuantity > 0
+        ? cost / typedQuantity
+        : Number(elements.supplyUnitPrice.value || 0);
+      const piecesPerUnit = Number(elements.supplyPiecesPerUnit.value || 0);
+      const quantity = calculateSupplyMovementQuantity(supply, {
+        rawQuantity: elements.supplyQuantity.value,
+        cost,
+        unitPrice,
+        piecesPerUnit,
+        type,
+      });
+      if (!supply || !Number.isFinite(quantity) || quantity <= 0) return;
+
+      if (type === "purchase") {
+        if (unitPrice > 0) supply.purchaseUnitPrice = unitPrice;
+        if (piecesPerUnit > 0) supply.piecesPerPurchaseUnit = piecesPerUnit;
+      }
+
+      const movementId = createId();
+      next.supplyMovements.unshift({
+        id: movementId,
+        supplyId: supply.id,
+        type,
+        quantity,
+        cost: type === "purchase" ? cost : 0,
+        unitPrice: type === "purchase" ? unitPrice : 0,
+        piecesPerUnit: type === "purchase" ? piecesPerUnit : 0,
+        createdAt: new Date().toISOString(),
+        note: type === "purchase" ? "Compra registrada desde inventario" : "Uso registrado desde inventario",
+      });
+
+      if (type === "purchase") {
+        const previousValue = Number(supply.quantity || 0) * Number(supply.averageCost || 0);
+        const nextQuantity = Number(supply.quantity || 0) + quantity;
+        supply.quantity = nextQuantity;
+        if (cost > 0 && nextQuantity > 0) supply.averageCost = (previousValue + cost) / nextQuantity;
+        if (cost > 0) {
+          const expenseId = createId();
+          next.expenses.unshift({
+            id: expenseId,
+            name: `Compra de ${supply.name}`,
+            concept: `Compra de ${supply.name}`,
+            amount: cost,
+            category: supply.id === "gas" ? "gas" : "insumo",
+            paymentMethod: "efectivo",
+            supplyId: supply.id,
+            purchasedQuantity: quantity,
+            purchasedUnit: supply.unit,
+            notes: "Registrado desde inventario",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          next.supplyMovements[0].expenseId = expenseId;
+        }
+      } else {
+        supply.quantity = Math.max(0, Number(supply.quantity || 0) - quantity);
+      }
+    });
+
+    elements.supplyForm.reset();
+  } finally {
+    const submitButton = elements.supplySubmitButton;
+    if (submitButton) submitButton.disabled = false;
+    isSubmittingSupply = false;
+  }
 });
 
 elements.supplySelect?.addEventListener("change", syncSupplyPurchaseFields);
@@ -696,29 +748,41 @@ elements.ordersList.addEventListener("click", async (event) => {
   }
 
   if (statusButton) {
+    if (statusButton.disabled) return;
+    statusButton.disabled = true;
     const orderId = statusButton.dataset.orderId;
     const nextStatus = statusButton.dataset.status;
-    await mutate((next) => {
-      const order = next.orders.find((item) => item.id === orderId);
-      if (!order) return;
-      if (normalizeStatus(order.status) === "entregado") return;
-      order.status = nextStatus;
-      order.updatedAt = new Date().toISOString();
-      if (normalizeStatus(order.status) === "entregado") order.deliveredAt = order.updatedAt;
-    });
+    try {
+      await mutate((next) => {
+        const order = next.orders.find((item) => item.id === orderId);
+        if (!order) return;
+        if (normalizeStatus(order.status) === "entregado") return;
+        order.status = nextStatus;
+        order.updatedAt = new Date().toISOString();
+        if (normalizeStatus(order.status) === "entregado") order.deliveredAt = order.updatedAt;
+      });
+    } finally {
+      statusButton.disabled = false;
+    }
     return;
   }
 
   if (paidButton) {
+    if (paidButton.disabled) return;
+    paidButton.disabled = true;
     const orderId = paidButton.dataset.paid;
-    await mutate((next) => {
-      const order = next.orders.find((item) => item.id === orderId);
-      if (!order) return;
-      if (order.paid && normalizeStatus(order.status) === "entregado") return;
-      if (order.paid && isRecordLocked(order.paidAt || order.createdAt)) return;
-      order.paid = !order.paid;
-      order.paidAt = order.paid ? new Date().toISOString() : null;
-    });
+    try {
+      await mutate((next) => {
+        const order = next.orders.find((item) => item.id === orderId);
+        if (!order) return;
+        if (order.paid && normalizeStatus(order.status) === "entregado") return;
+        if (order.paid && isRecordLocked(order.paidAt || order.createdAt)) return;
+        order.paid = !order.paid;
+        order.paidAt = order.paid ? new Date().toISOString() : null;
+      });
+    } finally {
+      paidButton.disabled = false;
+    }
     return;
   }
 
@@ -728,11 +792,14 @@ elements.ordersList.addEventListener("click", async (event) => {
 
   if (deleteButton) {
     const orderId = deleteButton.dataset.deleteOrder;
+    const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(state.orders.find((item) => item.id === orderId)?.createdAt);
+    if (isLocked) {
+      const ok = confirm("Este pedido pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente?");
+      if (!ok) return;
+    }
     await mutate((next) => {
       const order = next.orders.find((item) => item.id === orderId);
       if (!order) return;
-      if (normalizeStatus(order.status) === "entregado") return;
-      if (isRecordLocked(order.createdAt)) return;
       next.orders = next.orders.filter((item) => item.id !== orderId);
     });
   }
@@ -769,61 +836,89 @@ elements.cancelEditClientBottom.addEventListener("click", closeClientEditor);
 
 elements.editOrderForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const submitBtn = elements.editOrderForm.querySelector('button[type="submit"]');
+  if (submitBtn?.disabled) return;
+  if (submitBtn) submitBtn.disabled = true;
+
   const orderId = elements.editOrderId.value;
   const itemId = elements.editOrderItemId.value;
   const quantity = Number(elements.editOrderQuantity.value);
   const price = Number(elements.editOrderPrice.value);
 
-  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) return;
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) {
+    if (submitBtn) submitBtn.disabled = false;
+    return;
+  }
 
-  await mutate((next) => {
-    const order = next.orders.find((item) => item.id === orderId);
-    if (!order) return;
-    if (normalizeStatus(order.status) === "entregado") return;
+  try {
+    await mutate((next) => {
+      const order = next.orders.find((item) => item.id === orderId);
+      if (!order) return;
+      if (normalizeStatus(order.status) === "entregado") return;
 
-    const items = getOrderItems(order);
-    const item = items.find((entry) => entry.id === itemId) || items[0];
-    if (!item) return;
-    item.weightKg = quantity;
-    item.pricePerKg = price;
-    item.subtotal = quantity * price;
-    item.total = roundUpToPeso(item.subtotal);
-    syncOrderTotalsFromItems(order);
-    order.updatedAt = new Date().toISOString();
-  });
+      const items = getOrderItems(order);
+      const item = items.find((entry) => entry.id === itemId) || items[0];
+      if (!item) return;
+      item.weightKg = quantity;
+      item.pricePerKg = price;
+      item.subtotal = quantity * price;
+      item.total = roundUpToPeso(item.subtotal);
+      syncOrderTotalsFromItems(order);
+      order.updatedAt = new Date().toISOString();
+    });
 
-  closeOrderEditor();
+    closeOrderEditor();
+  } catch (error) {
+    console.error("Error al editar pedido:", error);
+    alert("No se pudieron guardar los cambios del pedido.");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 });
 
 elements.editClientForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const submitBtn = elements.editClientForm.querySelector('button[type="submit"]');
+  if (submitBtn?.disabled) return;
+  if (submitBtn) submitBtn.disabled = true;
+
   const clientId = elements.editClientId.value;
   const name = elements.editClientName.value.trim().replace(/\s+/g, " ");
   const phone = normalizePhone(elements.editClientPhone.value);
-  if (!name) return;
+  if (!name) {
+    if (submitBtn) submitBtn.disabled = false;
+    return;
+  }
 
-  await mutate((next) => {
-    const client = next.customers.find((item) => item.id === clientId);
-    if (!client) return;
+  try {
+    await mutate((next) => {
+      const client = next.customers.find((item) => item.id === clientId);
+      if (!client) return;
 
-    const duplicate = next.customers.find((item) => item.id !== client.id && normalizeCustomerKey(item.name) === normalizeCustomerKey(name));
-    if (duplicate) {
-      throw new Error("Ya existe un cliente con ese nombre.");
-    }
-
-    client.name = name;
-    client.phone = phone;
-    client.updatedAt = new Date().toISOString();
-    next.orders.forEach((order) => {
-      if (order.customerId === client.id) {
-        order.customerName = name;
-        order.customerPhone = phone;
-        order.updatedAt = client.updatedAt;
+      const duplicate = next.customers.find((item) => item.id !== client.id && normalizeCustomerKey(item.name) === normalizeCustomerKey(name));
+      if (duplicate) {
+        throw new Error("Ya existe un cliente con ese nombre.");
       }
-    });
-  });
 
-  closeClientEditor();
+      client.name = name;
+      client.phone = phone;
+      client.updatedAt = new Date().toISOString();
+      next.orders.forEach((order) => {
+        if (order.customerId === client.id) {
+          order.customerName = name;
+          order.customerPhone = phone;
+          order.updatedAt = client.updatedAt;
+        }
+      });
+    });
+
+    closeClientEditor();
+  } catch (error) {
+    console.error("Error al editar cliente:", error);
+    alert(error?.message || "No se pudieron guardar los cambios del cliente.");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 });
 
 elements.servicesList.addEventListener("click", async (event) => {
@@ -864,7 +959,12 @@ elements.expenseList.addEventListener("click", async (event) => {
   const expenseId = deleteButton.dataset.deleteExpense;
   const expense = state.expenses.find((item) => item.id === expenseId);
   if (!expense) return;
-  if (isRecordLocked(expense.createdAt)) return;
+
+  const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(expense.createdAt);
+  if (isLocked) {
+    const ok = confirm("Este gasto pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente para limpiar duplicados?");
+    if (!ok) return;
+  }
 
   await mutate((next) => {
     const targetExpense = next.expenses.find((item) => item.id === expenseId);
@@ -875,40 +975,54 @@ elements.expenseList.addEventListener("click", async (event) => {
 });
 
 elements.clearDayButton.addEventListener("click", async () => {
-  const todayOrders = state.orders.filter((order) => isToday(order.createdAt));
-  const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt));
-  const todayExpenses = state.expenses.filter((expense) => isToday(expense.createdAt));
-  const sales = paidTodayOrders.reduce((sum, order) => sum + order.total, 0);
-  const expenseTotals = calculateExpenseTotals(todayExpenses);
-  const dateKeyStr = getLocalDateKey();
+  if (elements.clearDayButton.disabled) return;
+  elements.clearDayButton.disabled = true;
+  const originalText = elements.clearDayButton.textContent;
+  elements.clearDayButton.textContent = "Cerrando día...";
 
-  await mutate((next) => {
-    const closing = {
-      id: dateKeyStr,
-      dateKey: dateKeyStr,
-      closedAt: new Date().toISOString(),
-      ordersCount: todayOrders.length,
-      sales,
-      expenses: expenseTotals.cashOut,
-      operatingExpenses: expenseTotals.operativo,
-      supplyPurchases: expenseTotals.insumo,
-      gasPurchases: expenseTotals.gas,
-      lightExpenses: expenseTotals.luz,
-      personalWithdrawals: expenseTotals.retiro_personal,
-      investmentDebt: expenseTotals.inversion_deuda,
-      cashFlow: sales - expenseTotals.cashOut,
-      profit: sales - expenseTotals.operatingCost,
-    };
-    const existingIndex = next.closings.findIndex((item) => item.dateKey === dateKeyStr);
+  try {
+    const todayOrders = state.orders.filter((order) => isToday(order.createdAt));
+    const paidTodayOrders = state.orders.filter((order) => order.paid && isToday(order.paidAt || order.createdAt));
+    const todayExpenses = state.expenses.filter((expense) => isToday(expense.createdAt));
+    const sales = paidTodayOrders.reduce((sum, order) => sum + order.total, 0);
+    const expenseTotals = calculateExpenseTotals(todayExpenses);
+    const dateKeyStr = getLocalDateKey();
 
-    if (existingIndex >= 0) {
-      next.closings[existingIndex] = closing;
-    } else {
-      next.closings.unshift(closing);
-    }
-  });
+    await mutate((next) => {
+      const closing = {
+        id: dateKeyStr,
+        dateKey: dateKeyStr,
+        closedAt: new Date().toISOString(),
+        ordersCount: todayOrders.length,
+        sales,
+        expenses: expenseTotals.cashOut,
+        operatingExpenses: expenseTotals.operativo,
+        supplyPurchases: expenseTotals.insumo,
+        gasPurchases: expenseTotals.gas,
+        lightExpenses: expenseTotals.luz,
+        personalWithdrawals: expenseTotals.retiro_personal,
+        investmentDebt: expenseTotals.inversion_deuda,
+        cashFlow: sales - expenseTotals.cashOut,
+        profit: sales - expenseTotals.operatingCost,
+      };
+      const existingIndex = next.closings.findIndex((item) => item.dateKey === dateKeyStr);
 
-  elements.closingStatus.textContent = "Cierre guardado y sincronizando.";
+      if (existingIndex >= 0) {
+        next.closings[existingIndex] = closing;
+      } else {
+        next.closings.unshift(closing);
+      }
+    });
+
+    elements.closingStatus.textContent = "Cierre guardado y sincronizando.";
+  } catch (error) {
+    console.error("Error al cerrar el día:", error);
+    elements.closingStatus.textContent = "Error al cerrar el día. Intenta de nuevo.";
+    alert("No se pudo completar el cierre del día. Intenta nuevamente.");
+  } finally {
+    elements.clearDayButton.disabled = false;
+    elements.clearDayButton.textContent = originalText;
+  }
 });
 
 elements.exportButton.addEventListener("click", exportCsv);
@@ -978,13 +1092,21 @@ function normalizeState(saved) {
   return { ...fallback, ...saved, services, customers, orders, expenses, supplies, supplyMovements, closings: saved.closings || [] };
 }
 
-async function mutate(mutator) {
-  if (!engine) return;
-  const next = clone(state);
-  await mutator(next);
-  state = normalizeState(next);
-  render();
-  await engine.syncState(state);
+let mutationQueue = Promise.resolve();
+
+function mutate(mutator) {
+  if (!engine) return Promise.resolve();
+  const task = mutationQueue.then(async () => {
+    const next = clone(state);
+    await mutator(next);
+    state = normalizeState(next);
+    render();
+    await engine.syncState(state);
+  });
+  mutationQueue = task.catch((error) => {
+    console.error("Error en cola de mutación:", error);
+  });
+  return task;
 }
 
 function handleSyncEvent(event) {
@@ -1007,6 +1129,9 @@ function setSyncStatusUI(status) {
 }
 
 async function initializeSync(user) {
+  if (engine && typeof engine.stopRealtimeListeners === "function") {
+    engine.stopRealtimeListeners();
+  }
   localStore = new RapiditaSyncV2.IndexedDbV2({ dbName: DB_NAME, version: 2 });
   const saved = await localStore.get(DB_STORE, DB_STATE_KEY);
 
@@ -1028,6 +1153,12 @@ async function initializeSync(user) {
   const result = await engine.initialize(normalizeState(saved));
   state = normalizeState(result.state);
 
+  // Si tras normalizar se filtraron gastos duplicados o se reconciliaron pedidos,
+  // sincronizar el estado purgado hacia Firestore para que no sigan existiendo en la nube.
+  if (result.state && (result.state.expenses?.length !== state.expenses?.length || result.state.orders?.length !== state.orders?.length)) {
+    engine.syncState(state).catch((err) => console.warn("Aviso al sincronizar purga:", err));
+  }
+
   // Entrada instantánea: Ocultar pantalla de carga ya que tenemos los datos base
   elements.loginScreen.hidden = true;
   document.body.classList.remove("cloud-locked");
@@ -1036,52 +1167,10 @@ async function initializeSync(user) {
   setExpenseCategory(currentExpenseCategory);
   updatePreview();
   updateLiveWeather();
-
-  // AUTO-FIX: Corregir pedidos antiguos - usa fecha actual dinámica
-  const today = new Date();
-  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
-  const oldOrders = state.orders.filter(o => {
-    const d = new Date(o.createdAt);
-    return d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid);
-  });
-  
-  if (oldOrders.length > 0) {
-    console.log(`[Auto-Fix] Encontrados ${oldOrders.length} pedidos antiguos para cerrar.`);
-    await mutate((next) => {
-      next.orders.forEach(o => {
-        const d = new Date(o.createdAt);
-        if (d < cutoff && (normalizeStatus(o.status) !== "entregado" || !o.paid)) {
-          o.status = "entregado";
-          o.paid = true;
-          o.paidAt = o.createdAt;
-          o.deliveredAt = o.createdAt;
-          o.updatedAt = new Date().toISOString();
-        }
-      });
-    });
-  }
-  
-  // FIX: Eliminar gastos duplicados por monto, concepto y fecha (más robusto)
-  const seenExpenses = new Set();
-  await mutate((next) => {
-    const uniqueExpenses = [];
-    next.expenses.forEach(expense => {
-      // Crear clave única basada en monto, concepto y día (no hora exacta)
-      const expenseDate = new Date(expense.createdAt).toISOString().split('T')[0];
-      const key = `${expense.amount}-${expenseDate}-${(expense.concept || expense.name || '')}`.toLowerCase().replace(/\s+/g, '');
-      if (!seenExpenses.has(key)) {
-        seenExpenses.add(key);
-        uniqueExpenses.push(expense);
-      } else {
-        console.log(`[Dedup] Eliminando gasto duplicado: ${expense.concept || expense.name} - ${expense.amount} - ${expenseDate}`);
-      }
-    });
-    next.expenses = uniqueExpenses;
-  });
 }
 
 function normalizeExpenses(expenses) {
-  return (Array.isArray(expenses) ? expenses : []).map((expense) => {
+  const normalized = (Array.isArray(expenses) ? expenses : []).map((expense) => {
     const category = EXPENSE_CATEGORIES[expense.category] ? expense.category : "operativo";
     const paymentMethod = PAYMENT_METHODS[expense.paymentMethod] ? expense.paymentMethod : "efectivo";
     const concept = String(expense.concept || expense.name || CATEGORY_DEFAULT_CONCEPTS[category] || "Gasto").trim();
@@ -1100,6 +1189,29 @@ function normalizeExpenses(expenses) {
       createdAt: expense.createdAt || new Date().toISOString(),
       updatedAt: expense.updatedAt || expense.createdAt || new Date().toISOString(),
     };
+  });
+
+  // Deduplicación inteligente de compras de insumo/gas duplicadas:
+  // Si existen múltiples gastos de la misma categoría (insumo/gas) o compras de gas repetidas,
+  // con el mismo monto y misma fecha (día), conservar únicamente uno de ellos para limpiar el historial duplicado.
+  const seenSupplies = new Map();
+  return normalized.filter((exp) => {
+    const isGas = exp.category === "gas" || /gas/i.test(exp.concept || exp.name || "");
+    const isSupply = exp.category === "insumo" || isGas;
+    if (!isSupply) return true;
+
+    const dateKey = getLocalDateKey(new Date(exp.createdAt));
+    const amountVal = Math.round(Number(exp.amount || 0) * 100) / 100;
+    // Para el gas, unificar sin importar si se registró con supplyId: "gas" o null ("Recarga de gas" vs "Compra de Gas")
+    const key = isGas
+      ? `gas_${amountVal}_${dateKey}`
+      : `${exp.category}_${amountVal}_${dateKey}_${exp.supplyId || exp.concept || ""}`;
+
+    if (seenSupplies.has(key)) {
+      return false; // Descartar duplicado
+    }
+    seenSupplies.set(key, true);
+    return true;
   });
 }
 
@@ -1215,24 +1327,29 @@ function normalizeServices(services) {
 }
 
 function normalizeOrder(order, services) {
-  const statusMap = {
-    pendiente: "recibido",
-    lavada: "lavando",
-    secada: "secando",
-    doblada: "doblando",
-    lista: "listo",
-  };
   const service = services.find((item) => item.id === order.serviceId) || services[0];
+  const rawStatus = normalizeStatus(order.status);
+  let finalStatus = (order.deliveredAt && rawStatus === "recibido") ? "entregado" : rawStatus;
+
+  // RECONCILIACIÓN AUTOMÁTICA: Si un pedido fue creado hace más de 14 días (mes anterior)
+  // o su fecha de creación pertenece a un día cerrado anterior, y físicamente ya fue atendido,
+  // normalizar su estado a entregado para que no quede eternamente atascado como activo/pendiente.
+  const orderDateKey = getLocalDateKey(new Date(order.createdAt || Date.now()));
+  const todayDateKey = getLocalDateKey();
+  const isOldOrder = (Date.now() - new Date(order.createdAt || Date.now()).getTime()) > 14 * 24 * 60 * 60 * 1000;
+  if (finalStatus !== "entregado" && (isOldOrder || (orderDateKey < todayDateKey && (order.deliveredAt || order.paid)))) {
+    finalStatus = "entregado";
+  }
 
   const normalized = {
     ...order,
     serviceId: order.serviceId || service.id,
     serviceName: order.serviceName || service.name,
     unit: order.unit || service.unit,
-    status: statusMap[order.status] || order.status || "recibido",
+    status: finalStatus,
     paid: Boolean(order.paid),
     paidAt: order.paidAt || null,
-    deliveredAt: order.deliveredAt || null,
+    deliveredAt: order.deliveredAt || (finalStatus === "entregado" ? (order.updatedAt || order.createdAt || new Date().toISOString()) : null),
   };
   const rawItems = Array.isArray(order.items) && order.items.length
     ? order.items
@@ -1348,7 +1465,7 @@ function applyInventoryFromExpense(targetState, expense) {
   const nextQuantity = Number(supply.quantity || 0) + quantity;
   supply.quantity = nextQuantity;
   if (cost > 0 && nextQuantity > 0) supply.averageCost = (previousValue + cost) / nextQuantity;
-  if (expense.category === "gas") supply.tankSize = Number(elements.expenseGasTankSize.value || supply.tankSize || 30);
+  if (expense.category === "gas") supply.tankSize = Number(elements.expenseGasTankSize?.value || supply.tankSize || 30);
 
   targetState.supplyMovements.unshift({
     id: createId(),
@@ -1714,6 +1831,10 @@ function getIconMarkup(name) {
 }
 
 function renderServicesSelect() {
+  const previousSelectedId = elements.serviceSelect.value;
+  const previousService = state.services.find((s) => s.id === previousSelectedId);
+  const wasPreviouslyInactive = previousService && !previousService.active;
+
   const activeServices = state.services.filter((service) => service.active);
   const options = (activeServices.length ? activeServices : state.services).map((service) => {
     return `<option value="${service.id}">${escapeHtml(service.name)} - ${moneyFormatter.format(service.price)} / ${service.unit}</option>`;
@@ -1721,6 +1842,32 @@ function renderServicesSelect() {
 
   elements.serviceSelect.innerHTML = options.join("");
   syncSelectedServicePrice();
+  
+  // Mostrar aviso si no hay servicios activos o si el seleccionado se desactivó
+  const warningElement = document.getElementById("noActiveServicesWarning");
+  const submitOrderButton = document.getElementById("submitOrderButton");
+  if (warningElement && submitOrderButton) {
+    if (activeServices.length === 0) {
+      warningElement.innerHTML = '<i data-lucide="alert-circle" style="width: 16px; height: 16px; display: inline; vertical-align: middle;"></i> No hay servicios activos. Actívalos en la pestaña Servicios antes de crear un pedido.';
+      warningElement.style.display = "block";
+      submitOrderButton.disabled = true;
+      submitOrderButton.style.opacity = "0.5";
+      submitOrderButton.style.cursor = "not-allowed";
+      renderIcons();
+    } else if (wasPreviouslyInactive) {
+      warningElement.innerHTML = `<i data-lucide="alert-circle" style="width: 16px; height: 16px; display: inline; vertical-align: middle;"></i> El servicio "${escapeHtml(previousService.name)}" ha sido desactivado. Se ha seleccionado otro automáticamente.`;
+      warningElement.style.display = "block";
+      submitOrderButton.disabled = false;
+      submitOrderButton.style.opacity = "1";
+      submitOrderButton.style.cursor = "pointer";
+      renderIcons();
+    } else {
+      warningElement.style.display = "none";
+      submitOrderButton.disabled = false;
+      submitOrderButton.style.opacity = "1";
+      submitOrderButton.style.cursor = "pointer";
+    }
+  }
 }
 
 function syncSelectedServicePrice() {
@@ -1860,7 +2007,10 @@ function renderOrders() {
   });
 
   if (!orders.length) {
-    elements.ordersList.innerHTML = document.querySelector("#emptyOrdersTemplate").innerHTML;
+    const emptyTemplate = document.querySelector("#emptyOrdersTemplate");
+    elements.ordersList.innerHTML = emptyTemplate
+      ? emptyTemplate.innerHTML
+      : '<div class="empty-state"><strong>Sin pedidos activos</strong></div>';
     return;
   }
 
@@ -1918,7 +2068,9 @@ function renderOrderCard(order) {
             : `${STATUS_FLOW.map((item) => `<button class="mini-status ${item === status ? "active" : ""}" data-order-id="${order.id}" data-status="${item}" type="button">${STATUS_LABELS[item]}</button>`).join("")}
               <button class="mini-status active" data-add-service="${order.id}" type="button">Agregar servicio</button>
               ${locked
-                ? `<span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>${order.paid ? "" : `<button class="mini-status" data-paid="${order.id}" type="button">Registrar pago de hoy</button>`}`
+                ? `<span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>
+                   ${order.paid ? "" : `<button class="mini-status" data-paid="${order.id}" type="button">Registrar pago de hoy</button>`}
+                   <button class="mini-status danger" data-delete-order="${order.id}" data-locked="true" type="button">Eliminar</button>`
                 : `<button class="mini-status" data-paid="${order.id}" type="button">${order.paid ? "Marcar sin pago" : "Marcar pagado"}</button>
                    <button class="mini-status danger" data-delete-order="${order.id}" type="button">Eliminar</button>`}`}
         </div>
@@ -2313,26 +2465,12 @@ function isCurrentMonth(value, reference = new Date()) {
 }
 
 function isVisibleInOrdersList(order) {
-  // Si el pedido no está pagado, debe ser visible siempre para poder registrar el pago
-  if (!order.paid) return true;
-
-  const status = normalizeStatus(order.status);
-  const createdAt = new Date(order.createdAt);
-  const today = new Date();
-  const cutoffDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // Fecha actual - Pedidos anteriores a hoy
-
-  // Si es un pedido viejo (antes de hoy), solo mostrar si ya está entregado y pagado
-  if (createdAt < cutoffDate) {
-    if (status === "entregado" && order.paid) {
-      return isToday(order.deliveredAt || order.createdAt);
-    }
-    return false;
-  }
-
-  // Para pedidos nuevos (Septiembre 2026 en adelante)
-  if (status !== "entregado") return true;
-  const referenceDate = new Date(order.deliveredAt || order.createdAt);
-  return isToday(referenceDate);
+  if (normalizeStatus(order.status) !== "entregado") return true;
+  const deliveredDate = new Date(order.deliveredAt || order.updatedAt || order.createdAt);
+  const limit = new Date();
+  limit.setDate(limit.getDate() - 7);
+  limit.setHours(0, 0, 0, 0);
+  return deliveredDate >= limit;
 }
 
 function formatShortDate(value) {
@@ -2376,7 +2514,7 @@ function renderExpenses() {
       </span>
       <strong>${moneyFormatter.format(expense.amount)}</strong>
       ${isRecordLocked(expense.createdAt)
-        ? '<span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>'
+        ? '<button class="delete-button" data-delete-expense="' + expense.id + '" data-locked="true" type="button" title="Eliminar gasto de día cerrado">Quitar</button><span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>'
         : `<button class="delete-button" data-delete-expense="${expense.id}" type="button">Quitar</button>`}
     </div>
   `).join("");
@@ -2653,14 +2791,16 @@ function openWhatsAppForOrder(order) {
 }
 
 function normalizeStatus(status) {
+  const clean = String(status || "").trim().toLowerCase();
   const map = {
     pendiente: "recibido",
     lavada: "lavando",
     secada: "secando",
     doblada: "doblando",
     lista: "listo",
+    entregada: "entregado",
   };
-  return map[status] || status || "recibido";
+  return map[clean] || clean || "recibido";
 }
 
 function isActiveOrder(order) {
@@ -2731,9 +2871,17 @@ async function initializeApp() {
 
     cloudUser = user;
     if (!user) {
+      if (engine && typeof engine.stopRealtimeListeners === "function") {
+        engine.stopRealtimeListeners();
+      }
+      engine = null;
       elements.loginScreen.hidden = false;
       document.body.classList.add("cloud-locked");
       elements.loginGoogleButton.disabled = false;
+      return;
+    }
+
+    if (engine && engine.user?.uid === user.uid && engine.listenersActive) {
       return;
     }
 
@@ -2750,6 +2898,12 @@ async function initializeApp() {
   if (navigator.storage?.persist) {
     navigator.storage.persist().catch(() => {});
   }
+
+  window.addEventListener("online", () => {
+    if (engine && typeof engine.drain === "function") {
+      engine.drain().catch(() => {});
+    }
+  });
 
 }
 

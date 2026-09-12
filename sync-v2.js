@@ -201,7 +201,9 @@
     async getCollection(entity) {
       const snapshot = await this.collection(entity).get();
       const documents = snapshot?.docs || [];
-      return documents.map((document) => ({ id: document.id, ...clone(document.data()) }));
+      return documents
+        .map((document) => ({ id: document.id, ...clone(document.data()) }))
+        .filter((item) => !item.deletedAt);
     }
 
     async create(entity, entityId, value) {
@@ -359,7 +361,7 @@
       if (this.listenerOrderFix) await this.enableNetwork();
       const remoteState = await this.readRemoteState();
       const hasRemoteData = ENTITY_KEYS.some((key) => remoteState[key].length);
-      const initialState = hasRemoteData ? this.mergeRemoteWithLocal(remoteState, localState) : clone(localState);
+      const initialState = hasRemoteData ? await this.mergeRemoteWithLocal(remoteState, localState) : clone(localState);
       if (!hasRemoteData) await this.seedRemote(initialState);
       this.setCurrentState(initialState);
       await this.localStore.put("syncMetadata", { key: "device", deviceId: this.deviceId, schemaVersion: 2 }, "device");
@@ -380,11 +382,23 @@
       ENTITY_KEYS.forEach((key) => this.stateByEntity.set(key, new Map((nextState?.[key] || []).map((item) => [item.id, clone(item)]))));
     }
 
-    mergeRemoteWithLocal(remoteState, localState) {
+    async mergeRemoteWithLocal(remoteState, localState) {
       const merged = clone(remoteState);
+      const pending = await this.queue.pending();
       ENTITY_KEYS.forEach((key) => {
         const byId = new Map((merged[key] || []).map((item) => [item.id, item]));
-        (localState?.[key] || []).forEach((item) => { if (!byId.has(item.id)) byId.set(item.id, clone(item)); });
+        const pendingIds = new Set(
+          pending
+            .filter((op) => op.entity === key && ["pending", "sending", "conflict"].includes(op.status))
+            .map((op) => op.entityId)
+        );
+        (localState?.[key] || []).forEach((item) => {
+          // Si el elemento no existe en remoto, SOLO conservarlo si fue creado localmente y está pendiente de subir.
+          // De lo contrario, significa que fue eliminado en remoto o es un fantasma viejo en IndexedDB.
+          if (!byId.has(item.id) && pendingIds.has(item.id)) {
+            byId.set(item.id, clone(item));
+          }
+        });
         merged[key] = [...byId.values()];
       });
       return merged;
@@ -537,7 +551,16 @@
       // another device closes that business day. Once reconnected, never
       // apply that stale operation silently over the closing. Keep it in the
       // conflict queue for explicit review instead.
-      if (["orders", "expenses", "supplyMovements"].includes(entity)) {
+      // EXCEPCIÓN QUIRÚRGICA: Actualizaciones de ciclo de vida de pedidos (entregar, cobrar, notas)
+      // y operaciones de eliminación legítimas se permiten después de días cerrados sin causar conflicto.
+      const isOrderLifecycleUpdate = entity === "orders" &&
+        operation.type === "update" &&
+        Array.isArray(operation.changedFields) &&
+        operation.changedFields.length > 0 &&
+        operation.changedFields.every((f) => ["status", "deliveredAt", "paid", "paidAt", "notes", "updatedAt"].includes(f));
+      const isDeleteOperation = operation.type === "delete";
+
+      if (["orders", "expenses", "supplyMovements"].includes(entity) && !isOrderLifecycleUpdate && !isDeleteOperation) {
         const dateValue = operation.changes?.createdAt || operation.changes?.date || remote?.createdAt || remote?.date || operation.createdAtClient;
         const dateKey = this.localDateKey(dateValue);
         if (dateKey) {

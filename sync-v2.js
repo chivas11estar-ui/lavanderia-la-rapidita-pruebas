@@ -227,15 +227,19 @@
     }
 
     async recordOperation(operation) {
-      await this.create("syncOperations", operation.operationId, {
-        operationId: operation.operationId,
-        entity: operation.entity,
-        entityId: operation.entityId,
-        userId: operation.userId,
-        deviceId: operation.deviceId,
-        appliedAt: nowIso(),
-        schemaVersion: 2,
-      });
+      try {
+        await this.create("syncOperations", operation.operationId, {
+          operationId: operation.operationId,
+          entity: operation.entity,
+          entityId: operation.entityId,
+          userId: operation.userId || null,
+          deviceId: operation.deviceId || null,
+          appliedAt: nowIso(),
+          schemaVersion: 2,
+        });
+      } catch (err) {
+        console.warn("Aviso al guardar syncOperations (no critico):", err?.message || err);
+      }
     }
 
     async subscribe(entity, callback, onError) {
@@ -463,7 +467,7 @@
         changedFields: [...changedFields],
         baseRevision,
         deviceId: this.deviceId,
-        userId: this.user.uid,
+        userId: this.user?.uid || null,
         createdAtClient,
         attempts: 0,
         status: "pending",
@@ -475,12 +479,7 @@
 
     async drain() {
       if (this.activeDrain) {
-        await this.activeDrain;
-        // A local write can be queued while the previous drain is still
-        // enumerating the queue. Re-check after it settles so that the new
-        // operation is not left pending until another user action occurs.
-        if (await this.queue.pending().then((items) => items.length)) return this.drain();
-        return;
+        return this.activeDrain;
       }
       const run = () => this.drainQueue();
       const withLock = typeof this.localStore.withQueueLock === "function" ? this.localStore.withQueueLock(run.bind(this)) : run();
@@ -495,6 +494,10 @@
         if (inFlightEntities.has(`${operation.entity}:${operation.entityId}`)) continue;
         inFlightEntities.add(`${operation.entity}:${operation.entityId}`);
         await this.process(operation);
+      }
+      const remaining = await this.queue.pending();
+      if (!remaining.length) {
+        this.emit({ type: "operationApplied" });
       }
     }
 
@@ -551,16 +554,13 @@
       // another device closes that business day. Once reconnected, never
       // apply that stale operation silently over the closing. Keep it in the
       // conflict queue for explicit review instead.
-      // EXCEPCIÓN QUIRÚRGICA: Actualizaciones de ciclo de vida de pedidos (entregar, cobrar, notas)
-      // y operaciones de eliminación legítimas se permiten después de días cerrados sin causar conflicto.
-      const isOrderLifecycleUpdate = entity === "orders" &&
-        operation.type === "update" &&
-        Array.isArray(operation.changedFields) &&
-        operation.changedFields.length > 0 &&
-        operation.changedFields.every((f) => ["status", "deliveredAt", "paid", "paidAt", "notes", "updatedAt"].includes(f));
+      // EXCEPCIÓN: Las actualizaciones a pedidos existentes (entregar, cobrar, notas o ajustes)
+      // se permiten SIEMPRE, incluso si el pedido se creó en un día cerrado, ya que la entrega
+      // o cobro físico ocurre legítimamente días después de la recepción.
+      const isOrderUpdate = entity === "orders" && operation.type === "update";
       const isDeleteOperation = operation.type === "delete";
 
-      if (["orders", "expenses", "supplyMovements"].includes(entity) && !isOrderLifecycleUpdate && !isDeleteOperation) {
+      if (["orders", "expenses", "supplyMovements"].includes(entity) && !isOrderUpdate && !isDeleteOperation) {
         const dateValue = operation.changes?.createdAt || operation.changes?.date || remote?.createdAt || remote?.date || operation.createdAtClient;
         const dateKey = this.localDateKey(dateValue);
         if (dateKey) {
@@ -598,8 +598,11 @@
 
       const remoteChangedFields = operation.changedFields.filter((field) => Number(remote.fieldVersions?.[field] || 0) > Number(operation.baseRevision || 0));
       if (remoteChangedFields.length) {
-        const conflict = await this.conflictManager.record(operation, remote, remoteChangedFields);
-        return { status: "conflict", conflict };
+        const isOrderUpdate = entity === "orders" && operation.type === "update";
+        if (!isOrderUpdate) {
+          const conflict = await this.conflictManager.record(operation, remote, remoteChangedFields);
+          return { status: "conflict", conflict };
+        }
       }
       if (isTerminalStatus(remote.status) && operation.changes.status && operation.changes.status !== remote.status) {
         const conflict = await this.conflictManager.record(operation, remote, ["status"]);
@@ -618,7 +621,13 @@
     }
 
     async recordOperation(operation) {
-      if (typeof this.remote.recordOperation === "function") await this.remote.recordOperation(operation);
+      if (typeof this.remote.recordOperation === "function") {
+        try {
+          await this.remote.recordOperation(operation);
+        } catch (err) {
+          console.warn("Aviso al registrar operación de sincronización:", err);
+        }
+      }
     }
 
     operationDocument(operation, remote) {
@@ -722,10 +731,21 @@
       const remoteIds = new Set(remoteItems.map((item) => item.id));
       const pending = await this.queue.pending();
       if (generation !== this.listenerGeneration || !this.listenersActive) return;
-      const pendingIds = new Set(pending.filter((operation) => operation.entity === entity && ["pending", "sending", "conflict"].includes(operation.status)).map((operation) => operation.entityId));
+      const pendingOps = pending.filter((op) => op.entity === entity && ["pending", "sending"].includes(op.status));
+      const pendingIds = new Set(pendingOps.map((op) => op.entityId));
       const localById = new Map((this.currentState[entity] || []).map((item) => [item.id, item]));
+
+      // Sobreponer cambios locales pendientes sobre los documentos remotos para evitar parpadeos o reversiones
+      const mergedRemote = remoteItems.map((remoteItem) => {
+        const matchingOp = pendingOps.find((op) => op.entityId === remoteItem.id);
+        if (matchingOp && matchingOp.changes) {
+          return { ...remoteItem, ...clone(matchingOp.changes) };
+        }
+        return remoteItem;
+      });
+
       const localPending = [...pendingIds].filter((id) => !remoteIds.has(id) && localById.has(id)).map((id) => clone(localById.get(id)));
-      nextState[entity] = [...remoteItems, ...localPending];
+      nextState[entity] = [...mergedRemote, ...localPending];
       this.setCurrentState(nextState);
       this.emit({ type: "remoteUpdate", entity, count: items.length, generation });
       if (typeof this.onStateChange === "function") this.onStateChange(clone(nextState));

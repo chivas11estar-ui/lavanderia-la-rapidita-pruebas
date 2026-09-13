@@ -16,6 +16,9 @@
     const cycles = purchases.map((purchase, index) => {
       const nextPurchase = purchases[index + 1];
       const start = new Date(purchase.createdAt);
+      if (index === 0) {
+        start.setHours(0, 0, 0, 0);
+      }
       const end = nextPurchase ? new Date(nextPurchase.createdAt) : new Date(now);
       const orders = (state?.orders || []).filter((order) => {
         const createdAt = new Date(order.createdAt);

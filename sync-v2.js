@@ -640,16 +640,18 @@
         schemaVersion: 2,
         lastOperationId: operation.operationId,
         lastDeviceId: operation.deviceId,
-        updatedBy: operation.userId,
+        updatedBy: operation.userId || null,
         updatedAt: nowIso(),
         fieldVersions,
       };
       if (!remote) {
         document.createdAt = operation.createdAtClient || nowIso();
-        document.createdBy = operation.userId;
+        document.createdBy = operation.userId || null;
         document.sourceOperationId = operation.operationId;
       }
-      if (operation.type === "delete") document.deletedAt = nowIso();
+      if (operation.type === "delete") {
+        document.deletedAt = nowIso();
+      }
       return document;
     }
 

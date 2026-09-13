@@ -389,6 +389,16 @@ elements.orderForm.addEventListener("submit", async (event) => {
     const service = getSelectedService();
     const quantity = Number(elements.weightKg.value);
     const price = Number(elements.pricePerKg.value);
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      alert("Por favor ingresa una cantidad o peso válido mayor a cero.");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      alert("Por favor ingresa un precio válido.");
+      return;
+    }
+
     const subtotal = quantity * price;
     const total = roundUpToPeso(subtotal);
     const item = {
@@ -772,6 +782,17 @@ elements.ordersList.addEventListener("click", async (event) => {
     paidButton.disabled = true;
     const orderId = paidButton.dataset.paid;
     try {
+      const currentOrder = state.orders.find((item) => item.id === orderId);
+      if (currentOrder?.paid) {
+        if (normalizeStatus(currentOrder.status) === "entregado") {
+          alert("El pedido ya fue entregado como pagado y no se puede modificar su estatus de pago.");
+          return;
+        }
+        if (isRecordLocked(currentOrder.paidAt || currentOrder.createdAt)) {
+          alert("Este cobro pertenece a un día cerrado o anterior y no se puede desmarcar para no alterar cortes pasados.");
+          return;
+        }
+      }
       await mutate((next) => {
         const order = next.orders.find((item) => item.id === orderId);
         if (!order) return;
@@ -791,17 +812,23 @@ elements.ordersList.addEventListener("click", async (event) => {
   }
 
   if (deleteButton) {
-    const orderId = deleteButton.dataset.deleteOrder;
-    const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(state.orders.find((item) => item.id === orderId)?.createdAt);
-    if (isLocked) {
-      const ok = confirm("Este pedido pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente?");
-      if (!ok) return;
+    if (deleteButton.disabled) return;
+    deleteButton.disabled = true;
+    try {
+      const orderId = deleteButton.dataset.deleteOrder;
+      const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(state.orders.find((item) => item.id === orderId)?.createdAt);
+      if (isLocked) {
+        const ok = confirm("Este pedido pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente?");
+        if (!ok) return;
+      }
+      await mutate((next) => {
+        const order = next.orders.find((item) => item.id === orderId);
+        if (!order) return;
+        next.orders = next.orders.filter((item) => item.id !== orderId);
+      });
+    } finally {
+      deleteButton.disabled = false;
     }
-    await mutate((next) => {
-      const order = next.orders.find((item) => item.id === orderId);
-      if (!order) return;
-      next.orders = next.orders.filter((item) => item.id !== orderId);
-    });
   }
 });
 
@@ -955,23 +982,29 @@ elements.servicesList.addEventListener("click", async (event) => {
 elements.expenseList.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest("[data-delete-expense]");
   if (!deleteButton) return;
+  if (deleteButton.disabled) return;
+  deleteButton.disabled = true;
 
-  const expenseId = deleteButton.dataset.deleteExpense;
-  const expense = state.expenses.find((item) => item.id === expenseId);
-  if (!expense) return;
+  try {
+    const expenseId = deleteButton.dataset.deleteExpense;
+    const expense = state.expenses.find((item) => item.id === expenseId);
+    if (!expense) return;
 
-  const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(expense.createdAt);
-  if (isLocked) {
-    const ok = confirm("Este gasto pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente para limpiar duplicados?");
-    if (!ok) return;
+    const isLocked = deleteButton.dataset.locked === "true" || isRecordLocked(expense.createdAt);
+    if (isLocked) {
+      const ok = confirm("Este gasto pertenece a un día cerrado o anterior. ¿Estás seguro de que deseas eliminarlo permanentemente para limpiar duplicados?");
+      if (!ok) return;
+    }
+
+    await mutate((next) => {
+      const targetExpense = next.expenses.find((item) => item.id === expenseId);
+      if (!targetExpense) return;
+      reverseInventoryFromExpense(next, targetExpense);
+      next.expenses = next.expenses.filter((item) => item.id !== expenseId);
+    });
+  } finally {
+    deleteButton.disabled = false;
   }
-
-  await mutate((next) => {
-    const targetExpense = next.expenses.find((item) => item.id === expenseId);
-    if (!targetExpense) return;
-    reverseInventoryFromExpense(next, targetExpense);
-    next.expenses = next.expenses.filter((item) => item.id !== expenseId);
-  });
 });
 
 elements.clearDayButton.addEventListener("click", async () => {
@@ -1429,7 +1462,10 @@ function setExpenseCategory(category) {
 function buildExpenseFromForm() {
   const category = currentExpenseCategory;
   const amount = Number(elements.expenseAmount.value || 0);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    alert("Por favor ingresa un monto válido para el gasto.");
+    return null;
+  }
 
   const supply = category === "gas"
     ? state.supplies.find((item) => item.id === "gas")
@@ -1443,7 +1479,10 @@ function buildExpenseFromForm() {
       : null;
   const purchasedUnit = category === "gas" ? "kg" : category === "insumo" ? (elements.expensePurchasedUnit.value || supply?.unit || null) : null;
 
-  if ((category === "insumo" || category === "gas") && (!supply || !Number.isFinite(purchasedQuantity) || purchasedQuantity <= 0)) return null;
+  if ((category === "insumo" || category === "gas") && (!supply || !Number.isFinite(purchasedQuantity) || purchasedQuantity <= 0)) {
+    alert(category === "gas" ? "Por favor indica los kg comprados de gas." : "Por favor indica la cantidad comprada del insumo.");
+    return null;
+  }
 
   const id = createId();
   return {
@@ -1891,9 +1930,12 @@ function syncSelectedServicePrice() {
 }
 
 function getSelectedService() {
-  return state.services.find((service) => service.id === elements.serviceSelect.value)
-    || state.services.find((service) => service.active)
-    || state.services[0];
+  return (
+    state.services.find((service) => service.id === elements.serviceSelect?.value) ||
+    state.services.find((service) => service.active) ||
+    state.services[0] ||
+    DEFAULT_SERVICES[0]
+  );
 }
 
 function renderSummary() {
@@ -2492,9 +2534,11 @@ function formatShortDate(value) {
 }
 
 function getLocalDateKey(value = new Date()) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
+  const date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -2505,11 +2549,13 @@ function isRecordLocked(createdAt) {
 }
 
 function showLockedDayMessage() {
-  elements.closingStatus.textContent = "Ese día ya está cerrado y sus datos no se pueden modificar.";
+  alert("Ese día ya está cerrado y sus datos no se pueden modificar.");
+  if (elements.closingStatus) elements.closingStatus.textContent = "Ese día ya está cerrado y sus datos no se pueden modificar.";
 }
 
 function showDeliveredOrderMessage() {
-  elements.closingStatus.textContent = "El pedido ya fue entregado y no se puede editar.";
+  alert("El pedido ya fue entregado y no se puede editar.");
+  if (elements.closingStatus) elements.closingStatus.textContent = "El pedido ya fue entregado y no se puede editar.";
 }
 
 function renderExpenses() {

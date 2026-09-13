@@ -582,7 +582,7 @@ elements.supplyForm?.addEventListener("submit", async (event) => {
       const cost = Number(elements.supplyCost.value || 0);
       const typedQuantity = Number(elements.supplyQuantity.value || 0);
       const unitPrice = type === "purchase" && cost > 0 && typedQuantity > 0
-        ? cost / typedQuantity
+        ? Math.round((cost / typedQuantity) * 100) / 100
         : Number(elements.supplyUnitPrice.value || 0);
       const piecesPerUnit = Number(elements.supplyPiecesPerUnit.value || 0);
       const quantity = calculateSupplyMovementQuantity(supply, {
@@ -1127,6 +1127,18 @@ function setSyncStatusUI(status) {
   elements.syncStatus.className = `sync-status ${status}`;
   elements.syncStatus.title = status === "pending" ? "Sincronizando..." : status === "synced" ? "Sincronizado" : status === "offline" ? "Sin conexión" : "Conflicto detectado";
 }
+
+elements.syncStatus?.addEventListener("click", async () => {
+  if (!engine) return;
+  setSyncStatusUI("pending");
+  try {
+    await engine.drain();
+    const pending = await engine.queue.pending();
+    if (!pending.length) setSyncStatusUI("synced");
+  } catch (err) {
+    console.warn("Aviso al sincronizar manualmente:", err);
+  }
+});
 
 async function initializeSync(user) {
   if (engine && typeof engine.stopRealtimeListeners === "function") {
@@ -2220,7 +2232,9 @@ function syncSupplyPurchaseFields(options = {}) {
   const supply = state.supplies.find((item) => item.id === elements.supplySelect.value);
   if (!supply) return;
   const isUsage = elements.supplyMovementType?.value === "usage";
-  if (!preserveValues || !elements.supplyUnitPrice.value) elements.supplyUnitPrice.value = supply.purchaseUnitPrice || "";
+  if (!preserveValues || !elements.supplyUnitPrice.value) {
+    elements.supplyUnitPrice.value = supply.purchaseUnitPrice ? String(Math.round(Number(supply.purchaseUnitPrice) * 100) / 100) : "";
+  }
   if (!preserveValues || !elements.supplyPiecesPerUnit.value) elements.supplyPiecesPerUnit.value = supply.piecesPerPurchaseUnit || "";
   elements.supplyUnitPrice.placeholder = supply.purchaseUnit ? `Precio por ${supply.purchaseUnit}` : "Precio por unidad";
   elements.supplyPiecesPerUnit.placeholder = supply.unit === "piezas" ? `Piezas por ${supply.purchaseUnit || "unidad"}` : "Solo si aplica";

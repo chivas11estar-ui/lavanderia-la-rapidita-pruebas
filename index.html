@@ -207,7 +207,7 @@
                 </label>
                 <label>
                   Precio por unidad
-                  <input id="pricePerKg" name="pricePerKg" type="number" min="1" step="0.5" inputmode="decimal" required />
+                  <input id="pricePerKg" name="pricePerKg" type="number" min="0.01" step="any" inputmode="decimal" required />
                 </label>
               </div>
             </section>
@@ -275,7 +275,7 @@
             </div>
             <div class="form-row">
               <label>Concepto<input id="expenseConcept" required placeholder="Compra de jabon" /></label>
-              <label>Monto total<input id="expenseAmount" type="number" min="0.5" step="0.5" required placeholder="120" /></label>
+              <label>Monto total<input id="expenseAmount" type="number" min="0.01" step="any" required placeholder="120" /></label>
             </div>
             <div class="form-row">
               <label>Metodo de pago
@@ -398,7 +398,7 @@
           <div class="block-heading"><div><h2>Agregar servicio</h2><p>Define precio y unidad.</p></div></div>
           <label>Nombre<input id="serviceName" required placeholder="Lavado express" /></label>
           <div class="form-row">
-            <label>Precio<input id="servicePrice" type="number" min="1" step="0.5" required placeholder="25" /></label>
+            <label>Precio<input id="servicePrice" type="number" min="0.01" step="any" required placeholder="25" /></label>
             <label>Unidad<select id="serviceUnit"><option value="kg">por kg</option><option value="pieza">por pieza</option></select></label>
           </div>
           <label>Descripcion<input id="serviceDescription" placeholder="Servicio regular de lavado" /></label>
@@ -434,8 +434,8 @@
                 <label><span id="supplyQuantityLabel">Cantidad que entra o sale</span><input id="supplyQuantity" type="number" min="0.01" step="0.01" placeholder="Opcional si calculas por costo" /></label>
               </div>
               <div class="form-row" id="supplyPurchaseCostFields">
-                <label>Costo total de compra<input id="supplyCost" type="number" min="0" step="0.5" placeholder="Ej. 30" /></label>
-                <label>Precio por unidad de compra<input id="supplyUnitPrice" type="number" min="0" step="0.5" placeholder="Ej. 80 por kg" /></label>
+                <label>Costo total de compra<input id="supplyCost" type="number" min="0" step="any" placeholder="Ej. 30" /></label>
+                <label>Precio por unidad de compra<input id="supplyUnitPrice" type="number" min="0" step="any" placeholder="Ej. 80 por kg" /></label>
               </div>
               <label id="supplyConversionField">Piezas por unidad de compra<input id="supplyPiecesPerUnit" type="number" min="0" step="1" placeholder="Solo si aplica" /></label>
               <button class="primary-button" id="supplySubmitButton" type="submit"><i data-lucide="save"></i>Guardar movimiento</button>
@@ -471,7 +471,7 @@
         <input id="editOrderId" type="hidden" />
         <input id="editOrderItemId" type="hidden" />
         <label>Cantidad<input id="editOrderQuantity" type="number" min="0.01" step="0.01" required /></label>
-        <label>Precio<input id="editOrderPrice" type="number" min="1" step="0.5" required /></label>
+        <label>Precio<input id="editOrderPrice" type="number" min="0.01" step="any" required /></label>
         <div class="calculation-box">
           <div><span>Subtotal</span><strong id="editOrderSubtotal">$0.00</strong></div>
           <div><span>Total redondeado</span><strong id="editOrderTotal">$0</strong></div>
@@ -505,9 +505,9 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-    <script src="sync-v2.js?v=34"></script>
-    <script src="supply-learning-v2.js?v=34"></script>
-    <script src="app.js?v=34"></script>
+    <script src="sync-v2.js?v=35"></script>
+    <script src="supply-learning-v2.js?v=35"></script>
+    <script src="app.js?v=35"></script>
     <script>
       if ("serviceWorker" in navigator && ["http:", "https:"].includes(location.protocol)) {
         window.addEventListener("load", () => {

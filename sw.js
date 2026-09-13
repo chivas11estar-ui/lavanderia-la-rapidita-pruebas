@@ -1,16 +1,16 @@
-const CACHE_NAME = "la-rapidita-v34";
+const CACHE_NAME = "la-rapidita-v35";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=32",
-  "./app.js?v=34",
+  "./app.js?v=35",
   "./manifest.webmanifest",
   "./assets/logo-la-rapidita.jpeg",
   "./assets/icon-180.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
-  "./sync-v2.js?v=34",
-  "./supply-learning-v2.js?v=34",
+  "./sync-v2.js?v=35",
+  "./supply-learning-v2.js?v=35",
 ];
 
 self.addEventListener("install", (event) => {

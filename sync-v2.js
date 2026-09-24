@@ -477,7 +477,7 @@
       return operation;
     }
 
-    async drain() {
+    drain() {
       if (this.activeDrain) {
         return this.activeDrain;
       }
@@ -579,21 +579,54 @@
           const conflict = await this.conflictManager.record(operation, remote, operation.changedFields);
           return { status: "conflict", conflict };
         }
+
+        // Deduplicación remota de gastos de gas: evitar documentos duplicados en Firestore el mismo día
+        if (entity === "expenses") {
+          const changes = operation.changes || {};
+          const isGas = changes.category === "gas"
+            || /gas/i.test(changes.concept || changes.name || "")
+            || changes.supplyId === "gas";
+          if (isGas) {
+            const dateValue = changes.createdAt || changes.date || operation.createdAtClient;
+            const dateKey = this.localDateKey(dateValue);
+            const amountVal = Math.round(Number(changes.amount || 0) * 100) / 100;
+            if (dateKey && amountVal > 0) {
+              const remoteExpenses = await this.remote.getCollection("expenses");
+              const existingGas = remoteExpenses.find((item) => {
+                if (item.id === operation.entityId || item.deletedAt || item._deleted) return false;
+                const itemIsGas = item.category === "gas" || /gas/i.test(item.concept || item.name || "") || item.supplyId === "gas";
+                if (!itemIsGas) return false;
+                const itemDateKey = this.localDateKey(item.createdAt || item.date);
+                const itemAmount = Math.round(Number(item.amount || 0) * 100) / 100;
+                return itemDateKey === dateKey && itemAmount === amountVal;
+              });
+              if (existingGas) {
+                await this.recordOperation(operation);
+                return { status: "applied", duplicate: true, deduplicatedWith: existingGas.id };
+              }
+            }
+          }
+        }
+
         await this.remote.create(entity, operation.entityId, this.operationDocument(operation, null));
         await this.recordOperation(operation);
         return { status: "applied" };
       }
 
-      if (!remote) {
-        const conflict = await this.conflictManager.record(operation, null, operation.changedFields);
-        return { status: "conflict", conflict };
-      }
-
       if (operation.type === "delete") {
+        if (!remote) {
+          await this.recordOperation(operation);
+          return { status: "applied", deleted: true };
+        }
         if (remote.lastOperationId === operation.operationId) return { status: "applied", duplicate: true };
         await this.remote.patch(entity, operation.entityId, this.operationDocument(operation, remote));
         await this.recordOperation(operation);
-        return { status: "applied" };
+        return { status: "applied", deleted: true };
+      }
+
+      if (!remote) {
+        const conflict = await this.conflictManager.record(operation, null, operation.changedFields);
+        return { status: "conflict", conflict };
       }
 
       const remoteChangedFields = operation.changedFields.filter((field) => Number(remote.fieldVersions?.[field] || 0) > Number(operation.baseRevision || 0));
@@ -615,6 +648,9 @@
 
     localDateKey(value) {
       if (!value) return "";
+      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+        return value.slice(0, 10);
+      }
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return "";
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -771,6 +807,7 @@
 
   global.RapiditaSyncV2 = {
     ENTITY_KEYS,
+    TERMINAL_ORDER_STATUS,
     IndexedDbV2,
     SyncQueue,
     FirestoreV2,

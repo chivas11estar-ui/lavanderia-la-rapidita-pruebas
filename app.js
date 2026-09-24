@@ -518,17 +518,30 @@ elements.expenseForm.addEventListener("submit", async (event) => {
     const expense = buildExpenseFromForm();
     if (!expense) return;
 
-    // PREVENCIÓN DE DUPLICADOS: Si es insumo o gas, verificar si ya se registró una compra idéntica en los últimos 2 minutos
-    if (["insumo", "gas"].includes(expense.category) && expense.supplyId) {
-      const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+    // PREVENCIÓN DE DUPLICADOS (R2): Verificar compras duplicadas de gas e insumos en la misma fecha
+    const isGasExpense = expense.category === "gas"
+      || /gas/i.test(expense.concept || expense.name || "")
+      || expense.supplyId === "gas";
+    const isSupplyExpense = expense.category === "insumo" || isGasExpense;
+
+    if (isSupplyExpense) {
+      const expenseDateKey = getLocalDateKey(expense.createdAt);
+      const expenseAmount = Math.round(Number(expense.amount || 0) * 100) / 100;
       const isDuplicate = state.expenses.some((e) => {
-        if (e.supplyId !== expense.supplyId) return false;
-        if (Math.abs(Number(e.amount) - Number(expense.amount)) > 0.01) return false;
-        const eTime = new Date(e.createdAt).getTime();
-        return eTime >= twoMinutesAgo;
+        const eDateKey = getLocalDateKey(e.createdAt);
+        if (eDateKey !== expenseDateKey) return false;
+        const eAmount = Math.round(Number(e.amount || 0) * 100) / 100;
+        if (Math.abs(eAmount - expenseAmount) > 0.01) return false;
+
+        if (isGasExpense) {
+          return e.category === "gas" || /gas/i.test(e.concept || e.name || "") || e.supplyId === "gas";
+        }
+        return (e.supplyId && expense.supplyId && e.supplyId === expense.supplyId)
+          || (e.concept && expense.concept && e.concept.toLowerCase() === expense.concept.toLowerCase());
       });
+
       if (isDuplicate) {
-        alert("Ya existe una compra reciente registrada para este insumo con el mismo monto en los últimos 2 minutos. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
+        alert("Ya existe un registro para este gasto con el mismo monto en la misma fecha. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
         return;
       }
     }
@@ -1061,7 +1074,7 @@ elements.clearDayButton.addEventListener("click", async () => {
 elements.exportButton.addEventListener("click", exportCsv);
 elements.exportReportsButton.addEventListener("click", exportCsv);
 
-window.addEventListener("beforeinstallprompt", (event) => {
+window.addEventListener?.("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
   elements.installAppButton.hidden = false;
@@ -1108,9 +1121,63 @@ function normalizeState(saved) {
   const services = normalizeServices(saved.services);
   const orders = (saved.orders || []).map((order) => normalizeOrder(order, services));
   const customers = normalizeCustomers(saved.customers, orders);
-  const supplies = normalizeSupplies(saved.supplies);
-  const supplyMovements = normalizeSupplyMovements(saved.supplyMovements, supplies);
-  const expenses = normalizeExpenses(saved.expenses);
+
+  // R2: Normalizar y deduplicar gastos primero para identificar registros descartados
+  const rawExpenses = Array.isArray(saved.expenses) ? saved.expenses : [];
+  const expenses = normalizeExpenses(rawExpenses);
+  const retainedExpenseIds = new Set(expenses.map((e) => e.id));
+  const droppedExpenseIds = new Set();
+  rawExpenses.forEach((e) => {
+    if (e && e.id && !retainedExpenseIds.has(e.id)) {
+      droppedExpenseIds.add(e.id);
+    }
+  });
+
+  // R2: Purgar movimientos de insumos huérfanos asociados a compras duplicadas
+  const rawSupplies = saved.supplies;
+  const supplies = normalizeSupplies(rawSupplies);
+  const supplyMovements = normalizeSupplyMovements(
+    saved.supplyMovements,
+    supplies,
+    retainedExpenseIds,
+    droppedExpenseIds
+  );
+
+  // R2: Restaurar existencias de inventario infundadas por compras duplicadas eliminadas
+  const prunedPurchasedQuantityBySupply = {};
+  const rawMovements = Array.isArray(saved.supplyMovements) ? saved.supplyMovements : [];
+  rawMovements.forEach((m) => {
+    if (!m || m.type !== "purchase") return;
+    const isRetained = supplyMovements.some((vm) => vm.id === m.id || (m.expenseId && vm.expenseId === m.expenseId));
+    if (!isRetained) {
+      const q = Number(m.quantity || 0);
+      if (q > 0) {
+        prunedPurchasedQuantityBySupply[m.supplyId] = (prunedPurchasedQuantityBySupply[m.supplyId] || 0) + q;
+      }
+    }
+  });
+
+  // Si un gasto de gas duplicado no tenía movimiento explícito, deducir su volumen del tanque
+  rawExpenses.forEach((exp) => {
+    if (!droppedExpenseIds.has(exp.id)) return;
+    const isGas = exp.category === "gas" || /gas/i.test(exp.concept || exp.name || "") || exp.supplyId === "gas";
+    if (isGas) {
+      const hadMovement = rawMovements.some((m) => m.expenseId === exp.id);
+      if (!hadMovement) {
+        const gasQty = Number(exp.purchasedQuantity) || 30;
+        prunedPurchasedQuantityBySupply["gas"] = (prunedPurchasedQuantityBySupply["gas"] || 0) + gasQty;
+      }
+    }
+  });
+
+  // Aplicar deducción a supplies de forma idempotente y segura
+  supplies.forEach((supply) => {
+    const excess = prunedPurchasedQuantityBySupply[supply.id] || 0;
+    if (excess > 0) {
+      supply.quantity = Math.max(0, Math.round((Number(supply.quantity || 0) - excess) * 1000) / 1000);
+    }
+  });
+
   const customersById = new Map(customers.map((customer) => [customer.id, customer]));
   const customersByName = new Map(customers.map((customer) => [normalizeCustomerKey(customer.name), customer]));
 
@@ -1245,7 +1312,7 @@ function normalizeExpenses(expenses) {
     const isSupply = exp.category === "insumo" || isGas;
     if (!isSupply) return true;
 
-    const dateKey = getLocalDateKey(new Date(exp.createdAt));
+    const dateKey = getLocalDateKey(exp.createdAt);
     const amountVal = Math.round(Number(exp.amount || 0) * 100) / 100;
     // Para el gas, unificar sin importar si se registró con supplyId: "gas" o null ("Recarga de gas" vs "Compra de Gas")
     const key = isGas
@@ -1307,10 +1374,40 @@ function normalizeSupplies(supplies) {
   });
 }
 
-function normalizeSupplyMovements(movements, supplies) {
+function normalizeSupplyMovements(movements, supplies, retainedExpenseIds = null, droppedExpenseIds = null) {
   const supplyIds = new Set(supplies.map((supply) => supply.id));
+  const seenGasPurchases = new Set();
+  const seenExpensePurchases = new Set();
+
   return (Array.isArray(movements) ? movements : [])
-    .filter((movement) => supplyIds.has(movement.supplyId))
+    .filter((movement) => {
+      if (!movement || !supplyIds.has(movement.supplyId)) return false;
+      const isPurchase = movement.type !== "usage";
+      if (isPurchase) {
+        // Purgar movimientos huérfanos si su gasto fue descartado como duplicado
+        if (movement.expenseId && droppedExpenseIds && droppedExpenseIds.has(movement.expenseId)) {
+          return false;
+        }
+        // Purgar si el estado tiene lista de gastos válidos y este movimiento referencia un gasto inexistente
+        if (movement.expenseId && retainedExpenseIds && retainedExpenseIds.size > 0 && !retainedExpenseIds.has(movement.expenseId)) {
+          return false;
+        }
+        // Deduplicar múltiples movimientos de compra para el mismo expenseId retenido
+        if (movement.expenseId && retainedExpenseIds && retainedExpenseIds.has(movement.expenseId)) {
+          if (seenExpensePurchases.has(movement.expenseId)) return false;
+          seenExpensePurchases.add(movement.expenseId);
+        }
+        // Deduplicar movimientos idénticos de compra de gas en la misma fecha
+        if (movement.supplyId === "gas") {
+          const dateKey = getLocalDateKey(movement.createdAt);
+          const costVal = Math.round(Number(movement.cost || 0) * 100) / 100;
+          const gasKey = `gas_${movement.quantity || 30}_${costVal}_${dateKey}`;
+          if (seenGasPurchases.has(gasKey)) return false;
+          seenGasPurchases.add(gasKey);
+        }
+      }
+      return true;
+    })
     .map((movement) => {
       const supply = supplies.find((item) => item.id === movement.supplyId);
       const legacyBagPurchase = supply?.id === "bolsas"
@@ -1324,16 +1421,16 @@ function normalizeSupplyMovements(movements, supplies) {
           ? Number(movement.quantity || 0) / legacyBagConversion
           : Number(movement.quantity || 0);
       return {
-      id: movement.id || createId(),
-      expenseId: movement.expenseId || null,
-      supplyId: movement.supplyId,
-      type: movement.type === "usage" ? "usage" : "purchase",
-      quantity,
-      cost: Number(movement.cost || 0),
-      unitPrice: Number(movement.unitPrice || 0),
-      piecesPerUnit: supply?.id === "bolsas" ? 0 : Number(movement.piecesPerUnit || 0),
-      createdAt: movement.createdAt || new Date().toISOString(),
-      note: movement.note || "",
+        id: movement.id || createId(),
+        expenseId: movement.expenseId || null,
+        supplyId: movement.supplyId,
+        type: movement.type === "usage" ? "usage" : "purchase",
+        quantity,
+        cost: Number(movement.cost || 0),
+        unitPrice: Number(movement.unitPrice || 0),
+        piecesPerUnit: supply?.id === "bolsas" ? 0 : Number(movement.piecesPerUnit || 0),
+        createdAt: movement.createdAt || new Date().toISOString(),
+        note: movement.note || "",
       };
     });
 }
@@ -1371,23 +1468,29 @@ function normalizeServices(services) {
   }));
 }
 
-function normalizeOrder(order, services) {
-  const service = services.find((item) => item.id === order.serviceId) || services[0];
-  const rawStatus = normalizeStatus(order.status);
-  let finalStatus = (order.deliveredAt && rawStatus === "recibido") ? "entregado" : rawStatus;
+function normalizeOrder(order, services = (typeof DEFAULT_SERVICES !== "undefined" ? DEFAULT_SERVICES : [])) {
+  const serviceList = Array.isArray(services) && services.length ? services : (typeof DEFAULT_SERVICES !== "undefined" ? DEFAULT_SERVICES : []);
+  const service = serviceList.find((item) => item.id === order?.serviceId) || serviceList[0] || { id: "lavado-secado", name: "Lavado y Secado", unit: "kg" };
+  const rawStatus = normalizeStatus(order?.status);
+  let finalStatus = order?.deliveredAt ? "entregado" : rawStatus;
 
   // RECONCILIACIÓN AUTOMÁTICA: Si un pedido fue creado hace más de 14 días (mes anterior)
   // o su fecha de creación pertenece a un día cerrado anterior, y físicamente ya fue atendido,
   // normalizar su estado a entregado para que no quede eternamente atascado como activo/pendiente.
-  const orderDateKey = getLocalDateKey(new Date(order.createdAt || Date.now()));
+  const orderDateKey = getLocalDateKey(order?.createdAt || Date.now());
   const todayDateKey = getLocalDateKey();
-  const isOldOrder = (Date.now() - new Date(order.createdAt || Date.now()).getTime()) > 14 * 24 * 60 * 60 * 1000;
-  if (finalStatus !== "entregado" && (isOldOrder || (orderDateKey < todayDateKey && (order.deliveredAt || order.paid)))) {
+  const orderAgeMs = Date.now() - new Date(order?.createdAt || Date.now()).getTime();
+  const isOldOrder = orderAgeMs > 14 * 24 * 60 * 60 * 1000;
+  const isPastDay = (orderDateKey < todayDateKey) || (orderAgeMs >= 24 * 60 * 60 * 1000);
+  const isClosedDay = isPastDay
+    || (typeof state !== "undefined" && Array.isArray(state?.closings) && state.closings.some((closing) => closing.dateKey === orderDateKey));
+  if (finalStatus !== "entregado" && (isOldOrder || (isClosedDay && (order?.deliveredAt || order?.paid)))) {
     finalStatus = "entregado";
   }
 
   const normalized = {
     ...order,
+    customerPhone: typeof order?.customerPhone === "string" ? order.customerPhone : (order?.customerPhone ? String(order.customerPhone) : ""),
     serviceId: order.serviceId || service.id,
     serviceName: order.serviceName || service.name,
     unit: order.unit || service.unit,
@@ -2534,6 +2637,9 @@ function formatShortDate(value) {
 }
 
 function getLocalDateKey(value = new Date()) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
   const date = value instanceof Date ? value : new Date(value);
   if (isNaN(date.getTime())) return "";
   const year = date.getFullYear();
@@ -2543,7 +2649,7 @@ function getLocalDateKey(value = new Date()) {
 }
 
 function isRecordLocked(createdAt) {
-  const recordDateKey = getLocalDateKey(new Date(createdAt));
+  const recordDateKey = getLocalDateKey(createdAt);
   return recordDateKey < getLocalDateKey()
     || state.closings.some((closing) => closing.dateKey === recordDateKey);
 }
@@ -2864,7 +2970,28 @@ function normalizeStatus(status) {
 }
 
 function isActiveOrder(order) {
-  return !["listo", "entregado"].includes(normalizeStatus(order.status));
+  if (!order || typeof order !== "object") return false;
+  if (order.deliveredAt != null && order.deliveredAt !== "") return false;
+  const status = normalizeStatus(order.status);
+  if (status === "listo" || status === "entregado") return false;
+
+  if (order.createdAt) {
+    const createdTime = new Date(order.createdAt).getTime();
+    if (!Number.isNaN(createdTime)) {
+      const isOlderThan14Days = (Date.now() - createdTime) > 14 * 24 * 60 * 60 * 1000;
+      if (isOlderThan14Days) {
+        const orderDateKey = getLocalDateKey(order.createdAt);
+        const todayDateKey = getLocalDateKey();
+        const isClosedDay = (orderDateKey < todayDateKey)
+          || (typeof state !== "undefined" && Array.isArray(state?.closings) && state.closings.some((closing) => closing.dateKey === orderDateKey));
+        if (isClosedDay) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 function isCompletedOrder(order) {

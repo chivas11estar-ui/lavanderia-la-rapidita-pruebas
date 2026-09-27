@@ -177,6 +177,23 @@
       const operations = await this.localStore.getAll("syncQueue");
       return operations.filter((operation) => ["pending", "sending"].includes(operation.status)).sort((a, b) => String(a.createdAtClient).localeCompare(String(b.createdAtClient)));
     }
+
+    async compact(maxAgeMs = 72 * 60 * 60 * 1000) {
+      try {
+        const operations = await this.localStore.getAll("syncQueue");
+        const cutoff = Date.now() - maxAgeMs;
+        for (const op of operations) {
+          if (op.status === "applied") {
+            const timestamp = op.appliedAt || op.createdAtClient;
+            if (timestamp && new Date(timestamp).getTime() < cutoff) {
+              await this.localStore.delete("syncQueue", op.operationId);
+            }
+          }
+        }
+      } catch {
+        // Silently handle store errors during compaction
+      }
+    }
   }
 
   class FirestoreV2 {
@@ -312,7 +329,13 @@
     }
 
     emit(event) {
-      if (typeof this.onEvent === "function") this.onEvent({ ...event, at: nowIso() });
+      if (typeof this.onEvent === "function") {
+        try {
+          this.onEvent({ ...event, at: nowIso() });
+        } catch (emitError) {
+          console.error("Error en listener onEvent de sincronización:", emitError);
+        }
+      }
     }
 
     setConnectionState(nextState, details = {}) {
@@ -491,13 +514,19 @@
       const pending = await this.queue.pending();
       const inFlightEntities = new Set();
       for (const operation of pending) {
-        if (inFlightEntities.has(`${operation.entity}:${operation.entityId}`)) continue;
-        inFlightEntities.add(`${operation.entity}:${operation.entityId}`);
-        await this.process(operation);
+        const entityKey = `${operation.entity}:${operation.entityId}`;
+        if (inFlightEntities.has(entityKey)) continue;
+        inFlightEntities.add(entityKey);
+        try {
+          await this.process(operation);
+        } finally {
+          inFlightEntities.delete(entityKey);
+        }
       }
       const remaining = await this.queue.pending();
       if (!remaining.length) {
         this.emit({ type: "operationApplied" });
+        await this.queue.compact();
       }
     }
 
@@ -773,16 +802,43 @@
       const pendingIds = new Set(pendingOps.map((op) => op.entityId));
       const localById = new Map((this.currentState[entity] || []).map((item) => [item.id, item]));
 
-      // Sobreponer cambios locales pendientes sobre los documentos remotos para evitar parpadeos o reversiones
-      const mergedRemote = remoteItems.map((remoteItem) => {
-        const matchingOp = pendingOps.find((op) => op.entityId === remoteItem.id);
-        if (matchingOp && matchingOp.changes) {
-          return { ...remoteItem, ...clone(matchingOp.changes) };
+      // Indexar operaciones pendientes por entityId manteniendo orden cronológico
+      const opsByEntityId = new Map();
+      for (const op of pendingOps) {
+        if (!opsByEntityId.has(op.entityId)) {
+          opsByEntityId.set(op.entityId, []);
         }
-        return remoteItem;
-      });
+        opsByEntityId.get(op.entityId).push(op);
+      }
 
-      const localPending = [...pendingIds].filter((id) => !remoteIds.has(id) && localById.has(id)).map((id) => clone(localById.get(id)));
+      // Sobreponer cambios locales pendientes sobre los documentos remotos para evitar parpadeos o reversiones
+      const mergedRemote = [];
+      for (const remoteItem of remoteItems) {
+        const ops = opsByEntityId.get(remoteItem.id);
+        if (ops && ops.length) {
+          // LOGIC-02: Si la última operación pendiente es delete, omitir el elemento remoto
+          const lastOp = ops[ops.length - 1];
+          if (lastOp.type === "delete") {
+            continue;
+          }
+          let updated = { ...remoteItem };
+          for (const op of ops) {
+            if (op.changes) {
+              updated = { ...updated, ...clone(op.changes) };
+            }
+          }
+          mergedRemote.push(updated);
+        } else {
+          mergedRemote.push(remoteItem);
+        }
+      }
+
+      const localPending = [...pendingIds].filter((id) => {
+        if (remoteIds.has(id) || !localById.has(id)) return false;
+        const ops = opsByEntityId.get(id);
+        const lastOp = ops && ops[ops.length - 1];
+        return !lastOp || lastOp.type !== "delete";
+      }).map((id) => clone(localById.get(id)));
       nextState[entity] = [...mergedRemote, ...localPending];
       this.setCurrentState(nextState);
       this.emit({ type: "remoteUpdate", entity, count: items.length, generation });
@@ -816,4 +872,4 @@
     createOperationId: () => uuid("op"),
     getDeviceId,
   };
-}(window));
+}(typeof window !== "undefined" ? window : globalThis));

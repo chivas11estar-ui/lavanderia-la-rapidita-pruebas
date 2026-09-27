@@ -11,7 +11,7 @@
 
   function getSupplyStats(state, supplyId, now = new Date()) {
     const purchases = (state?.supplyMovements || [])
-      .filter((movement) => movement.supplyId === supplyId && movement.type === "purchase" && movement.quantity > 0)
+      .filter((movement) => movement.supplyId === supplyId && movement.type === "purchase" && movement.quantity > 0 && !movement.deletedAt && !movement._deleted)
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     const cycles = purchases.map((purchase, index) => {
       const nextPurchase = purchases[index + 1];
@@ -116,10 +116,11 @@
       };
     }).filter(p => p.kg > 0);
 
-    const totalCostPerKg = periods.reduce((sum, p) => sum + p.costPerKg, 0);
+    const totalAmount = periods.reduce((sum, p) => sum + p.amount, 0);
+    const totalKg = periods.reduce((sum, p) => sum + p.kg, 0);
 
     return {
-      learnedCostPerKg: periods.length > 0 ? totalCostPerKg / periods.length : 0,
+      learnedCostPerKg: totalKg > 0 ? totalAmount / totalKg : 0,
       periods: periods.length
     };
   }
@@ -143,4 +144,4 @@
   }
 
   global.RapiditaSupplyLearningV2 = Object.freeze({ getOrderItems, getOrderKg, getSupplyStats, getGasStats, getLightStats, getEstimatedSupplyCostPerKg, getEstimatedSupplyCostPerOrder, calculateOrderProfitability, calculateRecommendedKgPrice });
-}(window));
+}(typeof window !== "undefined" ? window : globalThis));

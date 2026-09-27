@@ -304,12 +304,17 @@ elements.loginGoogleButton.addEventListener("click", async () => {
     
     // Verificar email autorizado inmediatamente después del login
     const user = result.user;
-    const userEmail = (user.email || "").toLowerCase();
+    const userEmail = (user?.email || "").toLowerCase();
     
-    if (!AUTHORIZED_EMAILS.includes(userEmail)) {
-      await firebase.auth().signOut();
-      elements.loginMessage.textContent = `La cuenta ${userEmail} no está autorizada. Usa chivas11estar@gmail.com o karlyanbm@gmail.com.`;
-      elements.loginGoogleButton.disabled = false;
+    if (!user?.emailVerified || !AUTHORIZED_EMAILS.includes(userEmail)) {
+      try {
+        await firebase.auth().signOut();
+      } catch (signOutError) {
+        console.error("Error al cerrar sesión no autorizada:", signOutError);
+      } finally {
+        elements.loginMessage.textContent = "Tu cuenta de Google no tiene permisos asignados. Contacta al administrador del sistema.";
+        elements.loginGoogleButton.disabled = false;
+      }
       return;
     }
     
@@ -784,6 +789,8 @@ elements.ordersList.addEventListener("click", async (event) => {
         order.updatedAt = new Date().toISOString();
         if (normalizeStatus(order.status) === "entregado") order.deliveredAt = order.updatedAt;
       });
+    } catch (error) {
+      console.error("Error al actualizar estado del pedido:", error);
     } finally {
       statusButton.disabled = false;
     }
@@ -814,6 +821,8 @@ elements.ordersList.addEventListener("click", async (event) => {
         order.paid = !order.paid;
         order.paidAt = order.paid ? new Date().toISOString() : null;
       });
+    } catch (error) {
+      console.error("Error al cambiar estado de pago del pedido:", error);
     } finally {
       paidButton.disabled = false;
     }
@@ -839,6 +848,8 @@ elements.ordersList.addEventListener("click", async (event) => {
         if (!order) return;
         next.orders = next.orders.filter((item) => item.id !== orderId);
       });
+    } catch (error) {
+      console.error("Error al eliminar pedido:", error);
     } finally {
       deleteButton.disabled = false;
     }
@@ -967,11 +978,15 @@ elements.servicesList.addEventListener("click", async (event) => {
 
   if (toggleButton) {
     const serviceId = toggleButton.dataset.toggleService;
-    await mutate((next) => {
-      const service = next.services.find((item) => item.id === serviceId);
-      if (!service) return;
-      service.active = !service.active;
-    });
+    try {
+      await mutate((next) => {
+        const service = next.services.find((item) => item.id === serviceId);
+        if (!service) return;
+        service.active = !service.active;
+      });
+    } catch (error) {
+      console.error("Error al alternar estado del servicio:", error);
+    }
     return;
   }
 
@@ -984,11 +999,15 @@ elements.servicesList.addEventListener("click", async (event) => {
     const price = Number(nextPrice);
     if (!Number.isFinite(price) || price <= 0) return;
 
-    await mutate((next) => {
-      const service = next.services.find((item) => item.id === serviceId);
-      if (!service) return;
-      service.price = price;
-    });
+    try {
+      await mutate((next) => {
+        const service = next.services.find((item) => item.id === serviceId);
+        if (!service) return;
+        service.price = price;
+      });
+    } catch (error) {
+      console.error("Error al actualizar precio del servicio:", error);
+    }
   }
 });
 
@@ -1015,6 +1034,8 @@ elements.expenseList.addEventListener("click", async (event) => {
       reverseInventoryFromExpense(next, targetExpense);
       next.expenses = next.expenses.filter((item) => item.id !== expenseId);
     });
+  } catch (error) {
+    console.error("Error al eliminar gasto:", error);
   } finally {
     deleteButton.disabled = false;
   }
@@ -1201,6 +1222,11 @@ function mutate(mutator) {
     await mutator(next);
     state = normalizeState(next);
     render();
+    if (localStore && typeof localStore.put === "function") {
+      await localStore.put(DB_STORE, state, DB_STATE_KEY).catch((err) => {
+        console.warn("No se pudo guardar el estado local en IndexedDB:", err);
+      });
+    }
     await engine.syncState(state);
   });
   mutationQueue = task.catch((error) => {
@@ -1259,11 +1285,19 @@ async function initializeSync(user) {
     onStateChange: (nextState) => {
       state = normalizeState(nextState);
       render();
+      if (localStore && typeof localStore.put === "function") {
+        localStore.put(DB_STORE, state, DB_STATE_KEY).catch(() => {});
+      }
     },
   });
 
   const result = await engine.initialize(normalizeState(saved));
   state = normalizeState(result.state);
+  if (localStore && typeof localStore.put === "function") {
+    await localStore.put(DB_STORE, state, DB_STATE_KEY).catch((err) => {
+      console.warn("No se pudo guardar el estado local en IndexedDB:", err);
+    });
+  }
 
   // Si tras normalizar se filtraron gastos duplicados o se reconciliaron pedidos,
   // sincronizar el estado purgado hacia Firestore para que no sigan existiendo en la nube.
@@ -1651,7 +1685,7 @@ function renderExpenseSupplySelect() {
   if (!elements.expenseSupplySelect) return;
   elements.expenseSupplySelect.innerHTML = state.supplies
     .filter((supply) => supply.id !== "gas")
-    .map((supply) => `<option value="${supply.id}">${escapeHtml(supply.name)} (${escapeHtml(supply.unit)})</option>`)
+    .map((supply) => `<option value="${escapeHtml(supply.id)}">${escapeHtml(supply.name)} (${escapeHtml(supply.unit)})</option>`)
     .join("");
   syncExpenseSupplyFields();
 }
@@ -1991,7 +2025,7 @@ function renderServicesSelect() {
 
   const activeServices = state.services.filter((service) => service.active);
   const options = (activeServices.length ? activeServices : state.services).map((service) => {
-    return `<option value="${service.id}">${escapeHtml(service.name)} - ${moneyFormatter.format(service.price)} / ${service.unit}</option>`;
+    return `<option value="${escapeHtml(service.id)}">${escapeHtml(service.name)} - ${moneyFormatter.format(service.price)} / ${escapeHtml(service.unit)}</option>`;
   });
 
   elements.serviceSelect.innerHTML = options.join("");
@@ -2201,7 +2235,7 @@ function renderOrderCard(order) {
             <h3>${escapeHtml(order.customerName)}</h3>
             <p class="order-notes">${notes}</p>
           </div>
-          <button class="status-pill" data-order-id="${order.id}" data-status="${nextStatus}" type="button" ${isDone ? "disabled" : ""}>${statusLabel}</button>
+          <button class="status-pill" data-order-id="${escapeHtml(order.id)}" data-status="${escapeHtml(nextStatus)}" type="button" ${isDone ? "disabled" : ""}>${escapeHtml(statusLabel)}</button>
         </div>
         ${progress}
         <div class="order-divider"></div>
@@ -2218,18 +2252,18 @@ function renderOrderCard(order) {
           <strong>${profitability.profit < 0 ? "Perdida est." : "Ganancia est."} ${moneyFormatter.format(profitability.profit)}</strong>
         </div>
         <div class="order-actions-inline">
-          ${canNotify ? `<button class="mini-status whatsapp" data-whatsapp-order="${order.id}" type="button">WhatsApp listo</button>` : ""}
+          ${canNotify ? `<button class="mini-status whatsapp" data-whatsapp-order="${escapeHtml(order.id)}" type="button">WhatsApp listo</button>` : ""}
           ${isDone
             ? `<span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Pedido entregado</span>
-              ${order.paid ? "" : `<button class="mini-status" data-paid="${order.id}" type="button">Registrar pago</button>`}`
-            : `${STATUS_FLOW.map((item) => `<button class="mini-status ${item === status ? "active" : ""}" data-order-id="${order.id}" data-status="${item}" type="button">${STATUS_LABELS[item]}</button>`).join("")}
-              <button class="mini-status active" data-add-service="${order.id}" type="button">Agregar servicio</button>
+              ${order.paid ? "" : `<button class="mini-status" data-paid="${escapeHtml(order.id)}" type="button">Registrar pago</button>`}`
+            : `${STATUS_FLOW.map((item) => `<button class="mini-status ${item === status ? "active" : ""}" data-order-id="${escapeHtml(order.id)}" data-status="${escapeHtml(item)}" type="button">${STATUS_LABELS[item]}</button>`).join("")}
+              <button class="mini-status active" data-add-service="${escapeHtml(order.id)}" type="button">Agregar servicio</button>
               ${locked
                 ? `<span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>
-                   ${order.paid ? "" : `<button class="mini-status" data-paid="${order.id}" type="button">Registrar pago de hoy</button>`}
-                   <button class="mini-status danger" data-delete-order="${order.id}" data-locked="true" type="button">Eliminar</button>`
-                : `<button class="mini-status" data-paid="${order.id}" type="button">${order.paid ? "Marcar sin pago" : "Marcar pagado"}</button>
-                   <button class="mini-status danger" data-delete-order="${order.id}" type="button">Eliminar</button>`}`}
+                   ${order.paid ? "" : `<button class="mini-status" data-paid="${escapeHtml(order.id)}" type="button">Registrar pago de hoy</button>`}
+                   <button class="mini-status danger" data-delete-order="${escapeHtml(order.id)}" data-locked="true" type="button">Eliminar</button>`
+                : `<button class="mini-status" data-paid="${escapeHtml(order.id)}" type="button">${order.paid ? "Marcar sin pago" : "Marcar pagado"}</button>
+                   <button class="mini-status danger" data-delete-order="${escapeHtml(order.id)}" type="button">Eliminar</button>`}`}
         </div>
         ${renderOrderItemEditorList(order)}
       </div>
@@ -2248,7 +2282,7 @@ function renderOrderItemEditorList(order) {
         return `
           <div class="order-item-row">
             <span>${escapeHtml(item.serviceName || "Servicio")} · ${quantity} ${item.unit === "kg" ? "kg" : "pieza"}</span>
-            <button class="mini-status edit" data-edit-order="${order.id}" data-edit-item="${item.id || ""}" type="button">Editar</button>
+            <button class="mini-status edit" data-edit-order="${escapeHtml(order.id)}" data-edit-item="${escapeHtml(item.id || "")}" type="button">Editar</button>
           </div>
         `;
       }).join("")}
@@ -2280,8 +2314,8 @@ function renderServices() {
         <p>${escapeHtml(service.description)}</p>
       </div>
       <div class="service-actions">
-        <button class="switch ${service.active ? "on" : ""}" data-toggle-service="${service.id}" type="button" aria-label="Activar servicio"></button>
-        <button class="kebab" data-service-price="${service.id}" type="button" aria-label="Editar precio">...</button>
+        <button class="switch ${service.active ? "on" : ""}" data-toggle-service="${escapeHtml(service.id)}" type="button" aria-label="Activar servicio"></button>
+        <button class="kebab" data-service-price="${escapeHtml(service.id)}" type="button" aria-label="Editar precio">...</button>
       </div>
     </article>
   `).join("");
@@ -2291,7 +2325,7 @@ function renderSupplies() {
   if (!elements.suppliesList) return;
 
   elements.supplySelect.innerHTML = state.supplies
-    .map((supply) => `<option value="${supply.id}">${escapeHtml(supply.name)} (${escapeHtml(supply.unit)})</option>`)
+    .map((supply) => `<option value="${escapeHtml(supply.id)}">${escapeHtml(supply.name)} (${escapeHtml(supply.unit)})</option>`)
     .join("");
   syncSupplyPurchaseFields({ preserveValues: true });
 
@@ -2315,7 +2349,7 @@ function renderSupplies() {
           <p>${lastPurchase ? `Ultima compra: ${formatShortDate(lastPurchase.createdAt)} por ${moneyFormatter.format(lastPurchase.cost || 0)}` : "Sin compras registradas todavia."}</p>
         </div>
         <div class="service-actions">
-          <button class="status-pill supply-buy-button" data-supply-id="${supply.id}" data-supply-action="${isLow ? "purchase" : "usage"}" type="button" aria-label="${isLow ? "Registrar compra" : "Ajustar inventario"} de ${escapeHtml(supply.name)}">${isLow ? "Comprar" : "Ajustar"}</button>
+          <button class="status-pill supply-buy-button" data-supply-id="${escapeHtml(supply.id)}" data-supply-action="${isLow ? "purchase" : "usage"}" type="button" aria-label="${isLow ? "Registrar compra" : "Ajustar inventario"} de ${escapeHtml(supply.name)}">${isLow ? "Comprar" : "Ajustar"}</button>
         </div>
       </article>
     `;
@@ -2415,11 +2449,19 @@ function renderClients() {
     return;
   }
 
+  const ordersByCustomer = new Map();
+  for (const order of (state.orders || [])) {
+    if (!ordersByCustomer.has(order.customerId)) {
+      ordersByCustomer.set(order.customerId, []);
+    }
+    ordersByCustomer.get(order.customerId).push(order);
+  }
+
   elements.clientsList.innerHTML = clients.map((client) => {
-    const orders = state.orders.filter((order) => order.customerId === client.id);
+    const orders = ordersByCustomer.get(client.id) || [];
     const currentOrders = orders.filter((order) => isVisibleInOrdersList(order));
     const active = orders.filter(isActiveOrder).filter(isVisibleInOrdersList).length;
-    const total = orders.filter((order) => !order.paid && isVisibleInOrdersList(order)).reduce((sum, order) => sum + order.total, 0);
+    const total = orders.filter((order) => !order.paid).reduce((sum, order) => sum + order.total, 0);
     return `
       <article class="order-card">
         <div class="order-icon" aria-hidden="true"><i data-lucide="circle-user"></i></div>
@@ -2433,8 +2475,8 @@ function renderClients() {
             <span class="status-pill">${total > 0 ? `Debe ${moneyFormatter.format(total)}` : "Al corriente"}</span>
           </div>
           <div class="order-actions-inline">
-            <button class="mini-status active" data-new-order-customer="${client.id}" type="button">Nuevo pedido</button>
-            <button class="mini-status edit" data-edit-client="${client.id}" type="button">Editar nombre</button>
+            <button class="mini-status active" data-new-order-customer="${escapeHtml(client.id)}" type="button">Nuevo pedido</button>
+            <button class="mini-status edit" data-edit-client="${escapeHtml(client.id)}" type="button">Editar nombre</button>
           </div>
         </div>
       </article>
@@ -2680,8 +2722,8 @@ function renderExpenses() {
       </span>
       <strong>${moneyFormatter.format(expense.amount)}</strong>
       ${isRecordLocked(expense.createdAt)
-        ? '<button class="delete-button" data-delete-expense="' + expense.id + '" data-locked="true" type="button" title="Eliminar gasto de día cerrado">Quitar</button><span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>'
-        : `<button class="delete-button" data-delete-expense="${expense.id}" type="button">Quitar</button>`}
+        ? `<button class="delete-button" data-delete-expense="${escapeHtml(expense.id)}" data-locked="true" type="button" title="Eliminar gasto de día cerrado">Quitar</button><span class="date-chip"><i data-lucide="lock" aria-hidden="true"></i>Día cerrado</span>`
+        : `<button class="delete-button" data-delete-expense="${escapeHtml(expense.id)}" type="button">Quitar</button>`}
     </div>
   `).join("");
 }
@@ -2966,7 +3008,12 @@ function normalizeStatus(status) {
     lista: "listo",
     entregada: "entregado",
   };
-  return map[clean] || clean || "recibido";
+  const resolved = map[clean] || clean;
+  if (!resolved) return "recibido";
+  if (STATUS_FLOW.includes(resolved) || resolved === "desconocido") {
+    return resolved;
+  }
+  return "recibido";
 }
 
 function isActiveOrder(order) {
@@ -3021,7 +3068,21 @@ function formatPhone(value) {
 }
 
 function getNextStatus(status) {
-  const index = STATUS_FLOW.indexOf(normalizeStatus(status));
+  const clean = String(status || "").trim().toLowerCase();
+  const map = {
+    pendiente: "recibido",
+    lavada: "lavando",
+    secada: "secando",
+    doblada: "doblando",
+    lista: "listo",
+    entregada: "entregado",
+  };
+  if (!STATUS_FLOW.includes(clean) && !map[clean]) {
+    return "recibido";
+  }
+  const norm = normalizeStatus(status);
+  const index = STATUS_FLOW.indexOf(norm);
+  if (index === -1) return "recibido";
   return STATUS_FLOW[Math.min(index + 1, STATUS_FLOW.length - 1)] || "recibido";
 }
 
@@ -3030,7 +3091,11 @@ function capitalize(value) {
 }
 
 function csvCell(value) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+  let str = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replaceAll('"', '""')}"`;
 }
 
 function escapeHtml(value) {
@@ -3049,10 +3114,15 @@ async function initializeApp() {
   }
 
   firebase.auth().onAuthStateChanged(async (user) => {
-    if (user && !AUTHORIZED_EMAILS.includes((user.email || "").toLowerCase())) {
-      await firebase.auth().signOut();
-      elements.loginMessage.textContent = "Esta cuenta no esta autorizada para entrar.";
-      elements.loginGoogleButton.disabled = false;
+    if (user && (!user.emailVerified || !AUTHORIZED_EMAILS.includes((user.email || "").toLowerCase()))) {
+      try {
+        await firebase.auth().signOut();
+      } catch (signOutError) {
+        console.error("Error al cerrar sesión no autorizada:", signOutError);
+      } finally {
+        elements.loginMessage.textContent = "Tu cuenta de Google no tiene permisos asignados. Contacta al administrador del sistema.";
+        elements.loginGoogleButton.disabled = false;
+      }
       return;
     }
 
@@ -3094,4 +3164,13 @@ async function initializeApp() {
 
 }
 
-initializeApp();
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("Promesa rechazada no controlada:", event.reason);
+  });
+  window.addEventListener("error", (event) => {
+    console.error("Error global no capturado:", event.error || event.message);
+  });
+}
+
+initializeApp().catch((error) => console.error("Error crítico en arranque:", error));

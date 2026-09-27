@@ -386,10 +386,23 @@
       await this.localStore.open();
       this.setConnectionState("LOCAL_READY");
       if (this.listenerOrderFix) await this.enableNetwork();
-      const remoteState = await this.readRemoteState();
-      const hasRemoteData = ENTITY_KEYS.some((key) => remoteState[key].length);
-      const initialState = hasRemoteData ? await this.mergeRemoteWithLocal(remoteState, localState) : clone(localState);
-      if (!hasRemoteData) await this.seedRemote(initialState);
+
+      let remoteState = null;
+      let hasRemoteData = false;
+      try {
+        if (typeof navigator !== "undefined" && navigator.onLine !== false) {
+          remoteState = await this.readRemoteState();
+          hasRemoteData = ENTITY_KEYS.some((key) => remoteState[key].length);
+        }
+      } catch (error) {
+        console.warn("No se pudo leer estado remoto (offline o error). Usando cache local.", error);
+      }
+
+      // Si tenemos conexión, reconstruimos el estado aplicando las operaciones pendientes
+      // sobre la base de datos remota fresca. El cache local persistente solo se usa como fallback offline.
+      const initialState = remoteState ? await this.mergeRemoteWithQueue(remoteState) : clone(localState);
+      
+      if (remoteState && !hasRemoteData) await this.seedRemote(initialState);
       this.setCurrentState(initialState);
       await this.localStore.put("syncMetadata", { key: "device", deviceId: this.deviceId, schemaVersion: 2 }, "device");
       this.initialized = true;
@@ -409,23 +422,28 @@
       ENTITY_KEYS.forEach((key) => this.stateByEntity.set(key, new Map((nextState?.[key] || []).map((item) => [item.id, clone(item)]))));
     }
 
-    async mergeRemoteWithLocal(remoteState, localState) {
+    async mergeRemoteWithQueue(remoteState) {
       const merged = clone(remoteState);
       const pending = await this.queue.pending();
+      
       ENTITY_KEYS.forEach((key) => {
         const byId = new Map((merged[key] || []).map((item) => [item.id, item]));
-        const pendingIds = new Set(
-          pending
-            .filter((op) => op.entity === key && ["pending", "sending", "conflict"].includes(op.status))
-            .map((op) => op.entityId)
-        );
-        (localState?.[key] || []).forEach((item) => {
-          // Si el elemento no existe en remoto, SOLO conservarlo si fue creado localmente y está pendiente de subir.
-          // De lo contrario, significa que fue eliminado en remoto o es un fantasma viejo en IndexedDB.
-          if (!byId.has(item.id) && pendingIds.has(item.id)) {
-            byId.set(item.id, clone(item));
+        
+        // Iterar sobre las operaciones pendientes para esta entidad en orden cronológico
+        const entityOps = pending.filter((op) => op.entity === key && ["pending", "sending", "conflict"].includes(op.status));
+        
+        for (const op of entityOps) {
+          if (op.type === "delete") {
+            byId.delete(op.entityId);
+          } else if (op.type === "update" && byId.has(op.entityId)) {
+            const current = byId.get(op.entityId);
+            byId.set(op.entityId, { ...current, ...clone(op.changes) });
+          } else if (op.type === "create") {
+            const current = byId.get(op.entityId) || {};
+            byId.set(op.entityId, { ...current, ...clone(op.changes), id: op.entityId });
           }
-        });
+        }
+        
         merged[key] = [...byId.values()];
       });
       return merged;

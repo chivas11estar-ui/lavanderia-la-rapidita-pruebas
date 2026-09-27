@@ -2457,11 +2457,21 @@ function renderClients() {
     ordersByCustomer.get(order.customerId).push(order);
   }
 
+  const now = Date.now();
+
   elements.clientsList.innerHTML = clients.map((client) => {
     const orders = ordersByCustomer.get(client.id) || [];
     const currentOrders = orders.filter((order) => isVisibleInOrdersList(order));
     const active = orders.filter(isActiveOrder).filter(isVisibleInOrdersList).length;
     const total = orders.filter((order) => !order.paid).reduce((sum, order) => sum + order.total, 0);
+    
+    const has30DayDebt = orders.some(o => !o.paid && (now - new Date(o.createdAt).getTime() > 30 * 24 * 60 * 60 * 1000));
+    const has7DayDelay = orders.some(o => !o.paid && (now - new Date(o.createdAt).getTime() > 7 * 24 * 60 * 60 * 1000));
+    
+    let nameAlert = "";
+    if (has30DayDebt) nameAlert = " <span style='color: #b91c1c; font-size: 0.85em;'>⚠️ Deudor (>30d)</span>";
+    else if (has7DayDelay) nameAlert = " <span style='color: #b45309; font-size: 0.85em;'>⏱️ Tarda en recoger</span>";
+
     return `
       <article class="order-card">
         <div class="order-icon" aria-hidden="true"><i data-lucide="circle-user"></i></div>
@@ -2469,7 +2479,7 @@ function renderClients() {
           <div class="order-top">
             <div>
               <strong class="order-code">${active} activos</strong>
-              <h3>${escapeHtml(client.name)}</h3>
+              <h3>${escapeHtml(client.name)}${nameAlert}</h3>
               <p class="order-notes">${client.phone ? `${formatPhone(client.phone)} · ` : ""}${currentOrders.length} pedidos actuales · ${orders.length} historicos</p>
             </div>
             <span class="status-pill">${total > 0 ? `Debe ${moneyFormatter.format(total)}` : "Al corriente"}</span>

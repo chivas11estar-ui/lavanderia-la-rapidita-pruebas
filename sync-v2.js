@@ -63,6 +63,24 @@
     return `lavanderias/${laundryId}/${entity}`;
   }
 
+  function resolveSupplyKey(data) {
+    if (!data) return null;
+    if (data.supplyId) {
+      return String(data.supplyId).toLowerCase().trim();
+    }
+    const isGas = data.category === "gas"
+      || /gas/i.test(data.concept || data.name || "");
+    if (isGas) return "gas";
+    const text = `${data.concept || ""} ${data.name || ""}`.toLowerCase();
+    if (/jab[oó]n|detergente/i.test(text)) return "jabon";
+    if (/suavizante/i.test(text)) return "suavizante";
+    if (/bolsas?/i.test(text)) return "bolsas";
+    if (/cloro/i.test(text)) return "cloro";
+    if (/etiquetas?|cinta/i.test(text)) return "etiquetas";
+    if (data.category === "insumo" && text.trim()) return text.trim();
+    return null;
+  }
+
   class IndexedDbV2 {
     constructor({ dbName = "la-rapidita-lavanderia", version = 2, queueStore = "syncQueue", metadataStore = "syncMetadata", conflictStore = "conflicts" } = {}) {
       this.dbName = dbName;
@@ -627,29 +645,62 @@
           return { status: "conflict", conflict };
         }
 
-        // Deduplicación remota de gastos de gas: evitar documentos duplicados en Firestore el mismo día
+        // Deduplicación remota de gastos de insumos y gas: evitar documentos duplicados en Firestore el mismo día
         if (entity === "expenses") {
           const changes = operation.changes || {};
-          const isGas = changes.category === "gas"
-            || /gas/i.test(changes.concept || changes.name || "")
-            || changes.supplyId === "gas";
-          if (isGas) {
+          if (!changes.isIntentionalRepeat) {
+            const supplyKey = resolveSupplyKey(changes);
+            if (supplyKey) {
+              const dateValue = changes.createdAt || changes.date || operation.createdAtClient;
+              const dateKey = this.localDateKey(dateValue);
+              const amountVal = Math.round(Number(changes.amount || 0) * 100) / 100;
+              if (dateKey && amountVal > 0) {
+                const remoteExpenses = await this.remote.getCollection("expenses");
+                const existingExpense = remoteExpenses.find((item) => {
+                  if (item.id === operation.entityId || item.deletedAt || item._deleted) return false;
+                  if (item.isIntentionalRepeat) return false;
+                  const itemKey = resolveSupplyKey(item);
+                  if (itemKey !== supplyKey) return false;
+                  const itemDateKey = this.localDateKey(item.createdAt || item.date);
+                  const itemAmount = Math.round(Number(item.amount || 0) * 100) / 100;
+                  return itemDateKey === dateKey && itemAmount === amountVal;
+                });
+                if (existingExpense) {
+                  await this.recordOperation(operation);
+                  return { status: "applied", duplicate: true, deduplicatedWith: existingExpense.id };
+                }
+              }
+            }
+          }
+        }
+
+        // Deduplicación remota de movimientos de insumos (compras): evitar registros duplicados en Firestore
+        if (entity === "supplyMovements") {
+          const changes = operation.changes || {};
+          if (changes.type === "purchase" && !changes.isIntentionalRepeat) {
+            const supplyId = changes.supplyId ? String(changes.supplyId).toLowerCase().trim() : "";
             const dateValue = changes.createdAt || changes.date || operation.createdAtClient;
             const dateKey = this.localDateKey(dateValue);
-            const amountVal = Math.round(Number(changes.amount || 0) * 100) / 100;
-            if (dateKey && amountVal > 0) {
-              const remoteExpenses = await this.remote.getCollection("expenses");
-              const existingGas = remoteExpenses.find((item) => {
+            const costVal = Math.round(Number(changes.cost || 0) * 100) / 100;
+            const qtyVal = Number(changes.quantity || 0);
+            if (supplyId && dateKey && (costVal > 0 || qtyVal > 0)) {
+              const remoteMovements = await this.remote.getCollection("supplyMovements");
+              const existingMovement = remoteMovements.find((item) => {
                 if (item.id === operation.entityId || item.deletedAt || item._deleted) return false;
-                const itemIsGas = item.category === "gas" || /gas/i.test(item.concept || item.name || "") || item.supplyId === "gas";
-                if (!itemIsGas) return false;
+                if (item.type !== "purchase" || item.isIntentionalRepeat) return false;
+                const itemSupplyId = item.supplyId ? String(item.supplyId).toLowerCase().trim() : "";
+                if (itemSupplyId !== supplyId) return false;
                 const itemDateKey = this.localDateKey(item.createdAt || item.date);
-                const itemAmount = Math.round(Number(item.amount || 0) * 100) / 100;
-                return itemDateKey === dateKey && itemAmount === amountVal;
+                if (itemDateKey !== dateKey) return false;
+                const itemCost = Math.round(Number(item.cost || 0) * 100) / 100;
+                const itemQty = Number(item.quantity || 0);
+                if (costVal > 0 && itemCost !== costVal) return false;
+                if (qtyVal > 0 && Math.abs(itemQty - qtyVal) > 0.001) return false;
+                return true;
               });
-              if (existingGas) {
+              if (existingMovement) {
                 await this.recordOperation(operation);
-                return { status: "applied", duplicate: true, deduplicatedWith: existingGas.id };
+                return { status: "applied", duplicate: true, deduplicatedWith: existingMovement.id };
               }
             }
           }
@@ -695,10 +746,10 @@
 
     localDateKey(value) {
       if (!value) return "";
-      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-        return value.slice(0, 10);
+      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        return value.trim();
       }
-      const date = new Date(value);
+      const date = value instanceof Date ? value : new Date(value);
       if (Number.isNaN(date.getTime())) return "";
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     }

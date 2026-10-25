@@ -546,8 +546,16 @@ elements.expenseForm.addEventListener("submit", async (event) => {
       });
 
       if (isDuplicate) {
-        alert("Ya existe un registro para este gasto con el mismo monto en la misma fecha. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
-        return;
+        const supplyName = isGasExpense
+          ? "gas"
+          : (state.supplies.find((s) => s.id === expense.supplyId)?.name || expense.concept || "este insumo");
+        const confirmed = confirm(
+          `Ya existe un registro para ${supplyName} con el mismo monto (${moneyFormatter.format(expenseAmount)}) en esta fecha (${expenseDateKey}).\n\n¿Confirmas que es una segunda compra real y legítima?`
+        );
+        if (!confirmed) {
+          return;
+        }
+        expense.isIntentionalRepeat = true;
       }
     }
 
@@ -590,18 +598,33 @@ elements.supplyForm?.addEventListener("submit", async (event) => {
     const type = elements.supplyMovementType.value === "usage" ? "usage" : "purchase";
     const cost = Number(elements.supplyCost.value || 0);
 
-    // PREVENCIÓN DE DUPLICADOS: Si es compra desde inventario, verificar si ya se registró una compra idéntica en los últimos 2 minutos
+    // PREVENCIÓN DE DUPLICADOS: Si es compra desde inventario, verificar si ya se registró una compra idéntica en la misma fecha
+    let isIntentionalRepeat = false;
     if (type === "purchase" && supplyId) {
-      const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+      const todayDateKey = getLocalDateKey();
+      const isGasSupply = supplyId === "gas";
       const isDuplicate = state.expenses.some((e) => {
-        if (e.supplyId !== supplyId) return false;
-        if (Math.abs(Number(e.amount) - cost) > 0.01) return false;
-        const eTime = new Date(e.createdAt).getTime();
-        return eTime >= twoMinutesAgo;
+        const eDateKey = getLocalDateKey(e.createdAt);
+        if (eDateKey !== todayDateKey) return false;
+        const eAmount = Math.round(Number(e.amount || 0) * 100) / 100;
+        if (Math.abs(eAmount - cost) > 0.01) return false;
+
+        if (isGasSupply) {
+          return e.category === "gas" || /gas/i.test(e.concept || e.name || "") || e.supplyId === "gas";
+        }
+        return e.supplyId === supplyId;
       });
+
       if (isDuplicate) {
-        alert("Ya existe una compra reciente registrada para este insumo con el mismo monto en los últimos 2 minutos. Para evitar duplicados en caja e inventario, la operación fue cancelada.");
-        return;
+        const supplyObj = state.supplies.find((item) => item.id === supplyId);
+        const supplyName = supplyObj?.name || supplyId;
+        const confirmed = confirm(
+          `Ya existe una compra de ${supplyName} con el mismo monto (${moneyFormatter.format(cost)}) en esta fecha (${todayDateKey}).\n\n¿Confirmas que es una segunda compra real y legítima?`
+        );
+        if (!confirmed) {
+          return;
+        }
+        isIntentionalRepeat = true;
       }
     }
 
@@ -636,6 +659,7 @@ elements.supplyForm?.addEventListener("submit", async (event) => {
         cost: type === "purchase" ? cost : 0,
         unitPrice: type === "purchase" ? unitPrice : 0,
         piecesPerUnit: type === "purchase" ? piecesPerUnit : 0,
+        isIntentionalRepeat: Boolean(isIntentionalRepeat),
         createdAt: new Date().toISOString(),
         note: type === "purchase" ? "Compra registrada desde inventario" : "Uso registrado desde inventario",
       });
@@ -658,6 +682,7 @@ elements.supplyForm?.addEventListener("submit", async (event) => {
             purchasedQuantity: quantity,
             purchasedUnit: supply.unit,
             notes: "Registrado desde inventario",
+            isIntentionalRepeat: Boolean(isIntentionalRepeat),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           });
@@ -1332,6 +1357,7 @@ function normalizeExpenses(expenses) {
       purchasedQuantity: expense.purchasedQuantity == null ? null : Number(expense.purchasedQuantity || 0),
       purchasedUnit: expense.purchasedUnit || null,
       notes: expense.notes || "",
+      isIntentionalRepeat: Boolean(expense.isIntentionalRepeat),
       createdAt: expense.createdAt || new Date().toISOString(),
       updatedAt: expense.updatedAt || expense.createdAt || new Date().toISOString(),
     };
@@ -1342,6 +1368,11 @@ function normalizeExpenses(expenses) {
   // con el mismo monto y misma fecha (día), conservar únicamente uno de ellos para limpiar el historial duplicado.
   const seenSupplies = new Map();
   return normalized.filter((exp) => {
+    // Si la compra fue confirmada intencionalmente, NUNCA descartarla
+    if (exp.isIntentionalRepeat) {
+      return true;
+    }
+
     const isGas = exp.category === "gas" || /gas/i.test(exp.concept || exp.name || "");
     const isSupply = exp.category === "insumo" || isGas;
     if (!isSupply) return true;
@@ -1432,7 +1463,7 @@ function normalizeSupplyMovements(movements, supplies, retainedExpenseIds = null
           seenExpensePurchases.add(movement.expenseId);
         }
         // Deduplicar movimientos idénticos de compra de gas en la misma fecha
-        if (movement.supplyId === "gas") {
+        if (movement.supplyId === "gas" && !movement.isIntentionalRepeat) {
           const dateKey = getLocalDateKey(movement.createdAt);
           const costVal = Math.round(Number(movement.cost || 0) * 100) / 100;
           const gasKey = `gas_${movement.quantity || 30}_${costVal}_${dateKey}`;
@@ -1463,6 +1494,7 @@ function normalizeSupplyMovements(movements, supplies, retainedExpenseIds = null
         cost: Number(movement.cost || 0),
         unitPrice: Number(movement.unitPrice || 0),
         piecesPerUnit: supply?.id === "bolsas" ? 0 : Number(movement.piecesPerUnit || 0),
+        isIntentionalRepeat: Boolean(movement.isIntentionalRepeat),
         createdAt: movement.createdAt || new Date().toISOString(),
         note: movement.note || "",
       };
@@ -1664,6 +1696,7 @@ function applyInventoryFromExpense(targetState, expense) {
     cost,
     unitPrice: quantity > 0 ? cost / quantity : 0,
     piecesPerUnit: 0,
+    isIntentionalRepeat: Boolean(expense.isIntentionalRepeat),
     createdAt: expense.createdAt,
     note: `Compra registrada desde gastos: ${expense.concept}`,
   });
@@ -1673,12 +1706,30 @@ function reverseInventoryFromExpense(targetState, expense) {
   const linkedMovements = targetState.supplyMovements.filter((movement) => movement.expenseId === expense.id);
   if (!linkedMovements.length) return;
 
+  const affectedSupplyIds = new Set();
   linkedMovements.forEach((movement) => {
     const supply = targetState.supplies.find((item) => item.id === movement.supplyId);
     if (!supply || movement.type !== "purchase") return;
     supply.quantity = Math.max(0, Number(supply.quantity || 0) - Number(movement.quantity || 0));
+    affectedSupplyIds.add(supply.id);
   });
   targetState.supplyMovements = targetState.supplyMovements.filter((movement) => movement.expenseId !== expense.id);
+
+  // Recalcular averageCost para cada insumo afectado en función de los movimientos de compra restantes
+  affectedSupplyIds.forEach((supplyId) => {
+    const supply = targetState.supplies.find((item) => item.id === supplyId);
+    if (!supply) return;
+    const remainingPurchases = targetState.supplyMovements.filter(
+      (m) => m.supplyId === supplyId && m.type === "purchase" && Number(m.quantity || 0) > 0
+    );
+    if (remainingPurchases.length > 0) {
+      const totalCost = remainingPurchases.reduce((sum, m) => sum + Number(m.cost || 0), 0);
+      const totalQty = remainingPurchases.reduce((sum, m) => sum + Number(m.quantity || 0), 0);
+      supply.averageCost = totalQty > 0 ? Math.round((totalCost / totalQty) * 1000) / 1000 : 0;
+    } else if (supply.quantity <= 0) {
+      supply.averageCost = 0;
+    }
+  });
 }
 
 function renderExpenseSupplySelect() {
@@ -2689,11 +2740,12 @@ function formatShortDate(value) {
 }
 
 function getLocalDateKey(value = new Date()) {
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
+  if (!value) return "";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
   }
   const date = value instanceof Date ? value : new Date(value);
-  if (isNaN(date.getTime())) return "";
+  if (Number.isNaN(date.getTime())) return "";
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");

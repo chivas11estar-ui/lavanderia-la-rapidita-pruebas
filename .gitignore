@@ -1,4 +1,3 @@
-```
 # Logs and temp files
 *.log
 *.tmp
@@ -7,12 +6,18 @@
 # Environment
 .env
 .env.local
-.env.
+.env.*
 
 # Editors
 .vscode/
 .idea/
 
-# Original rules preserved
-*.log
-```
+# Internal reports and tracking
+.agents/
+AUDIT_REPORT_360.md
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_READY.md
+
+# Internal test suite
+test/
